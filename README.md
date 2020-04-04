@@ -3,7 +3,7 @@ A library for digital I/O that simplifies programming switches, buttons, knock s
 
 ## Overview
 
-![Digital sensors and switches](Images/DigitalSensors.png)
+![Digital sensors and switches](Images/DigitalSensors.jpg)
 
 This library can be used for any digital pin input signal, from sensors such as:
 * ON/OFF contacts
