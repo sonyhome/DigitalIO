@@ -3,7 +3,8 @@ A library for digital I/O that simplifies programming switches, buttons, knock s
 
 ## Overview
 
-![Digital sensors and switches]Images/DigitalSensors.png
+![Digital sensors and switches](Images/DigitalSensors.png)
+
 This library can be used for any digital pin input signal, from sensors such as:
 * ON/OFF contacts
 * Transient contacts
@@ -44,8 +45,9 @@ See the examples for more information (File -> Examples -> DigitalIO).
 The library comes with the classes digitalIo and digitaIoAvr. The AVR specific version doesn't use the Arduino digitalRead() or
 digitalWrite() commands so it is 500B smaller, and is faster, as shown in these screenshots.
 
-![Example 0 memory usagewith digitalIo]Images/digitalIo.png
-![Example 0 memory usagewith digitalIoAvr]Images/digitalIoAvr.png
+![Example 0 memory usagewith digitalIo](Images/digitalIo.png)
+
+![Example 0 memory usagewith digitalIoAvr](Images/digitalIoAvr.png)
 
 * Debounce routines require only 40 to 64B of "program storage space" memory, and return immediately unless an event to debounce is detected.
 * Simple read, write and config methods are inlined and have zero overhead
@@ -59,7 +61,7 @@ Push buttons:
 
 When using a push button or any other on/off sensor, they will change the signal level when they are enabled or detect an event. The transition from one state to another might be noisy and debounce will prevent detecting fake successive transitions. Again you can see in the raw "read" mode any noise your sensor can generate when changing state. The keypress mode will detect the keypress and key release because it will see the change in voltage level on the line. The debounce code will ignore any temporary transition and record a button event only when the level change is stable for a minimum time duration. The debounce code will ignore immediately any transition if the level goes back to the original level, instead of trying to wait for it to stabilize. If it is a valid level transition it will eventually become stable and be detected as such the next time the signal is sampled.
 
-![0_Debounce with a push-button switch]Images/Switch.png
+![0_Debounce with a push-button switch](Images/Switch.png)
 
 Knock sensors:
 
@@ -67,7 +69,7 @@ When using a knock sensor or similar event detection sensor, they typically will
 
 Note: Your loop needs to be fast enough to run through the knock detection fuction before the transitory signal disappears, else you might not detect it. This will be dependent on how you code your main loop.
 
-![0_Debounce with a knock sensor]Images/KnockSensor.png
+![0_Debounce with a knock sensor](Images/KnockSensor.png)
 
 ## Example A: Button
 
