@@ -40,10 +40,10 @@
 //
 // digitalIo<6, HIGH> button;
 // led.inputPullupMode();
-// if (button.isActive()) { handlePress();}
-// if (!button.isDefault()) { handlePress();}
-// if (button.debounce() == 1) { handlePress();}
-// button.debounce(); if (button.value() == LOW) { handlePress();}
+// if (button.isOn()) { handlePress();}
+// if (!button.isOff()) { handlePress();}
+// if (button.changed() == 1) { handlePress();}
+// button.changed(); if (button.value() == LOW) { handlePress();}
 // if (button.isTransitioned()) { handleKnockSensor();}
 //
 // Advanced override macros (set them before including the library):
@@ -72,8 +72,8 @@
 // digitalIo<6, LOW> led;
 // led.outputMode();
 // led.write(HIGH); // Turn on
-// led.set(); // Turn on
-// led.unSet(); // Turn off
+// led.turnOn(); // Turn on
+// led.turnOff(); // Turn off
 ////////////////////////////////////////////////////////////////////////////////
 // Internals
 //
@@ -164,10 +164,11 @@ constexpr uint16_t DEBOUNCE_ITERS = (DEBOUNCE_DELAY+LOOP_DELAY-1)/LOOP_DELAY;
 template<uint8_t pinNumber, uint8_t defaultState>
 class digitalIo
 {
-public:
-
+protected:
   // Last value of the pin read (HIGH or LOW)
   uint8_t value = defaultState;
+
+public:
 
   ////////////////////////////////////////////////////////////
   // @brief
@@ -262,7 +263,7 @@ public:
   // @brief
   // Writes to the output pin the non-default state voltage
   ////////////////////////////////////////////////////////////
-  inline void set(void)
+  inline void turnOn(void)
   {
     write((defaultState == LOW) ? HIGH : LOW);
   }
@@ -271,7 +272,7 @@ public:
   // @brief
   // Writes to the output its default rest state voltage level
   ////////////////////////////////////////////////////////////
-  inline void unSet(void)
+  inline void turnOff(void)
   {
     write(defaultState);
   }
@@ -280,10 +281,10 @@ public:
   // @brief
   // Returns true if the pin is receiving a non default signal
   ////////////////////////////////////////////////////////////
-  inline bool isActive(void)
+  inline bool isOn(void)
   {
     read();
-    DEBUG_PRINT3("isActive: ");
+    DEBUG_PRINT3("isOn: ");
     DEBUG_PRINT3(value);
     DEBUG_PRINT3("\n");
     return (value != defaultState);
@@ -293,10 +294,10 @@ public:
   // @brief
   // Returns true if the pin is at its default level
   ////////////////////////////////////////////////////////////
-  inline bool isDefault(void)
+  inline bool isOff(void)
   {
     read();
-    DEBUG_PRINT3("isDefault: ");
+    DEBUG_PRINT3("isOff: ");
     DEBUG_PRINT3(value);
     DEBUG_PRINT3("\n");
     return (value == defaultState);
@@ -330,7 +331,7 @@ public:
   /// If it stabilizes after 50msec, then the function will
   /// return after 80msec (with a 30msec default debounce).
   ////////////////////////////////////////////////////////////
-  bool isTransitioned(void)
+  bool triggered(void)
   {
     uint8_t lastValue = value;
     uint8_t i = 0;
@@ -355,7 +356,7 @@ public:
       {
         // Unstable signal detected
         lastValue = value;
-        DEBUG_PRINT1("debounce(");
+        DEBUG_PRINT1("triggered(");
         DEBUG_PRINT1(i);
         DEBUG_PRINT1("):");
         DEBUG_PRINT1(value);
@@ -383,7 +384,7 @@ public:
   /// Hence this function returns after no more than
   /// DIGITAL_IO_DEBOUNCE_DELAY msec.
   ////////////////////////////////////////////////////////////
-  int8_t debounce(void) {
+  int8_t changed(void) {
     const uint8_t lastValue = value;
     uint8_t i = 0;
 
@@ -398,7 +399,7 @@ public:
 	if (DEBUG_MODE && i != 0)
         {
           // We detected transient noise on the line
-          DEBUG_PRINT1("debounce(");
+          DEBUG_PRINT1("changed(");
           DEBUG_PRINT1(i);
           DEBUG_PRINT1("):");
           DEBUG_PRINT1(value);
@@ -410,7 +411,7 @@ public:
     }
     while ( i++ < DEBOUNCE_ITERS);
 
-    DEBUG_PRINT2("debounce(");
+    DEBUG_PRINT2("changed(");
     DEBUG_PRINT2(i);
     DEBUG_PRINT2("):");
     DEBUG_PRINT2(value);
@@ -646,7 +647,7 @@ public:
   // @brief
   // Writes to the output pin the non-default state voltage
   ////////////////////////////////////////////////////////////
-  inline void set(void)
+  inline void turnOn(void)
   {
     write((defaultState == LOW) ? HIGH : LOW);
   }
@@ -655,7 +656,7 @@ public:
   // @brief
   // Writes to the output its default rest state voltage level
   ////////////////////////////////////////////////////////////
-  inline void unSet(void)
+  inline void turnOff(void)
   {
     write(defaultState);
   }
@@ -664,10 +665,10 @@ public:
   // @brief
   // Returns true if the pin is receiving a non default signal
   ////////////////////////////////////////////////////////////
-  inline bool isActive(void)
+  inline bool isOn(void)
   {
     read();
-    DEBUG_PRINT3("isActive: ");
+    DEBUG_PRINT3("isOn: ");
     DEBUG_PRINT3(value);
     DEBUG_PRINT3("\n");
     return (value != defaultState);
@@ -677,10 +678,10 @@ public:
   // @brief
   // Returns true if the pin is at its default level
   ////////////////////////////////////////////////////////////
-  inline bool isDefault(void)
+  inline bool isOff(void)
   {
     read();
-    DEBUG_PRINT3("isDefault: ");
+    DEBUG_PRINT3("isOff: ");
     DEBUG_PRINT3(value);
     DEBUG_PRINT3("\n");
     return (value == defaultState);
@@ -714,7 +715,7 @@ public:
   /// If it stabilizes after 50msec, then the function will
   /// return after 80msec (with a 30msec default debounce).
   ////////////////////////////////////////////////////////////
-  bool isTransitioned(void)
+  bool triggered(void)
   {
     uint8_t lastValue = value;
     uint8_t i = 0;
@@ -739,7 +740,7 @@ public:
       {
         // Unstable signal detected
         lastValue = value;
-        DEBUG_PRINT1("debounce(");
+        DEBUG_PRINT1("triggered(");
         DEBUG_PRINT1(i);
         DEBUG_PRINT1("):");
         DEBUG_PRINT1(value);
@@ -767,7 +768,7 @@ public:
   /// Hence this function returns after no more than
   /// DIGITAL_IO_DEBOUNCE_DELAY msec.
   ////////////////////////////////////////////////////////////
-  int8_t debounce(void) {
+  int8_t changed(void) {
     const uint8_t lastValue = value;
     uint8_t i = 0;
 
@@ -782,7 +783,7 @@ public:
 	if (DEBUG_MODE && i != 0)
         {
           // We detected transient noise on the line
-          DEBUG_PRINT1("debounce(");
+          DEBUG_PRINT1("changed(");
           DEBUG_PRINT1(i);
           DEBUG_PRINT1("):");
           DEBUG_PRINT1(value);
@@ -794,7 +795,7 @@ public:
     }
     while ( i++ < DEBOUNCE_ITERS);
 
-    DEBUG_PRINT2("debounce(");
+    DEBUG_PRINT2("changed(");
     DEBUG_PRINT2(i);
     DEBUG_PRINT2("):");
     DEBUG_PRINT2(value);

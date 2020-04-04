@@ -7,27 +7,25 @@ digitalIo		KEYWORD1
 digitalIoAvr		KEYWORD1
 
 ########## functions ##########
+# Configuration
 inputMode		KEYWORD2
 inputPullupMode		KEYWORD2
 outputMode		KEYWORD2
 
-write			KEYWORD2
-set			KEYWORD2
-unSet			KEYWORD2
+# Input
+lastValue		KEYWORD2
 read			KEYWORD2
-isActive		KEYWORD2
-isDefault		KEYWORD2
-isTransitioned		KEYWORD2
-debounce		KEYWORD2
+isOn			KEYWORD2
+isOff			KEYWORD2
+triggered		KEYWORD2
+changed			KEYWORD2
 
-########## structures ##########
+# Output
+write			KEYWORD2
+turnOn			KEYWORD2
+turnOff			KEYWORD2
 
-########## constants ##########
-#menu LITERAL1
-menu KEYWORD2
-
-########## misc - macro defines ##########
-SERIALMENU_DISABLE_PROGMEM_SUPPORT	LITERAL2
-SERIALMENU_DISABLE_HEARTBEAT_ON_IDLE	LITERAL2
-SERIALMENU_MINIMAL_FOOTPRINT		LITERAL2
-GET_MENU_SIZE				LITERAL2
+##########  macros   ##########
+DIGITAL_IO_DEBUG		LITERAL2
+DIGITAL_IO_DEBOUNCE_DELAY	LITERAL2
+DIGITAL_IO_DEBOUNCE_LOOP_DELAY	LITERAL2

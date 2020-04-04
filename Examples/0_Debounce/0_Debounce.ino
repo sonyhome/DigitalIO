@@ -40,18 +40,22 @@
 // S ---> Pin 6 
 //
 ////////////////////////////////////////////////////////////////////////////////
+
+// These macros can be used to change the behavior of the DigitalIO library
 //#define DIGITAL_PIN_DEBUG 2
 //#define DIGITAL_PIN_DEBOUNCE_DELAY 200
+
 #include <DigitalIO.hpp>
 
-// Assume yout button is on pin 6, and by default the input is HIGH (5V) when
-// unused and LOW (ground) when pressed.
-//digitalIo<6, HIGH> button;
-//digitalIo<13, LOW> led;
+// Assumes your sensor is on pin 6, and by default the input is HIGH (5V) when
+// it is off and LOW (ground) when on. The sensor can be a simple button or
+// even a wire that you short to the ground to turn on.
+digitalIo<6, HIGH> inputSensor;
+digitalIo<13, LOW> led;
 
 // For AVR platforms using the port directly saves memory and is faster
-digitalIoAvr<'D', 6, HIGH> button;
-digitalIoAvr<'B', 5, LOW> led;
+//digitalIoAvr<'D', 6, HIGH> inputSensor;
+//digitalIoAvr<'B', 5, LOW> led;
 
 void setup() {
   // Initialize the serial console to see the output of the switch
@@ -64,6 +68,7 @@ void setup() {
 int32_t iters = 500000;
 
 void loop() {
+  // The main loop calls the 3 different ways to scan the digital input pin
   iters++;
   if (iters <= 500000) {
     if (iters == 1) {
@@ -87,56 +92,51 @@ void loop() {
 }
 
 void keypressLoop() {
-
   // Debounce will detect if the switch had a transition and report it only once
-//  switch((int8_t) button.read())
-  switch(button.debounce())
+  switch(inputSensor.changed())
   {
     case 1:
       Serial.println("Button is On!");
-      led.set();
+      led.turnOn();
       break;
     case -1:
       Serial.println("Button is off!");
-      led.unSet();
+      led.turnOff();
       break;
     case 0:
-      //Serial.print(button.lastValue());
-      //Serial.print(" is unchanged!");
       break;
   }
 }
 
 void readLoop() {
-  // Print the current state (with no debounce) but don't flood the screen
-  static bool state = false;
-//  if (button.read()) {
-  if (button.isActive()) {
-    if (state == false) {
+  // Print the current state (with no debounce) but don't flood the screen when value doesn't change
+  static bool wasAlreadySet = false;
+
+  if (inputSensor.isOn()) {
+    if (wasAlreadySet == false) {
       Serial.print("On ");
-      led.set();
+      led.turnOn();
+      wasAlreadySet = true;
     }
-    state = true;
   } else {
-    if (state == true) {
+    if (wasAlreadySet == true) {
       Serial.print("Off ");
-      led.unSet();
+      led.turnOff();
+      wasAlreadySet = false;
     }
-    state = false;
   }
 }
 
 
 void knockLoop() {
   // Print the current resting state when a knock sensor was triggered
-//  if (button.read()) {
-  if (button.isTransitioned()) {
-    if (button.lastValue() == HIGH) {
+  if (inputSensor.triggered()) {
+    if (inputSensor.lastValue() == HIGH) {
       Serial.println("Knock detected, stable is Off");
-      led.unSet();
+      led.turnOff();
     } else {
       Serial.println("Knock detected, stable is On");
-      led.set();
+      led.turnOn();
     }
   }
 }
