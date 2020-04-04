@@ -1,7 +1,7 @@
 # Digital IO library
-The Arduino Digital I/O  Library supports debounce, detection of level changes (for button type sensors) and transient signals (like knock sensors).
+The Arduino Digital I/O  Library supports debounce of noisy sensors, detection of level changes (button press) and transient signals (knock sensors).
 
-The library is designed to use only 1 byte per variable, compile very compact code, run as fast as using directly the underlying Arduino I/O functions, and provide a simple
+The library is designed to use only one byte per variable, compile very compact code, run as fast as using directly the underlying Arduino I/O functions, and provide a simple
 interface with easily readable code flow (see code examples A and B below). The library also comes as an AVR specific variant that is even faster and more compact.
 
 ## Overview
@@ -21,18 +21,18 @@ This library can be used for any digital pin input signal, from sensors such as:
 etc.
 
 You could use native Arduino digitalRead() or digitalWrite() directly to perform I/O on digital pins but it would be messier code and would not handle debounce.
-On AVR this is also realtively slow because of the way the Arduino translation layer is implemented, and DigitalIoAvr provides a faster AVR version of this library that is a 1 line change in your code to use.
+On AVR this is also realtively slow because of the way the Arduino translation layer is implemented, and __DigitalIoAvr__ provides a faster AVR version of this library that is a 1 line change in your code to use.
 
-About using the DigitalIO library:
+Using the DigitalIO library:
 
 * Your code syntax will be more concise
-* For digital inputs it provides compact debounce code that will filter out glitches when reading values
-* It provides both transition and levels debouncing, to support a variety of sensors and switches, including knock sensors
-* Configuration macros can be used to override the default debounce duration to make the code more resilient to line noise or faster response for clean signals
+* It provides compact debounce code that will filter out glitches when reading values
+* It provides both transition and levels changes, to support a variety of sensors and switches, including knock sensors
+* Macros can override the default debounce time to trade off resilience to noise versus faster response
 * Debounce function returns immediately for the common case when there is no signal transition
-* The library is coded to have near-zero code overhead
+* The library is coded to have near-zero code overhead without debouncing
 * An AVR specific version can be used just by changing the declaration of the variables.
-* Each instance of the class uses only 1 byte of dynamic memory to store the value.
+* Each DigitalIO variable uses only 1 byte of dynamic memory to store the value.
 
 The debounce logic is embedded in the class, so it does not clutter your code. It is also extremely fast and efficient when no debounce is needed,
 making it a good choice for programs that concurrently manage multiple things at the same time.
@@ -45,27 +45,27 @@ Try the examples (File -> Examples -> DigitalIO).
 
 # The library
 * Classes
-** __digitalIo<pin,defaultState>__: The main class, specify the I/O pin to attach to on the board, and the default electrical level at which the sensor or output is off.
-** __digitalIoAvr<port, portBit, defaultState>__: The alternate class for AVR microcontrollers (Uno, Mega, AtTiny...), you must specify the port letter in uppercase, and the port's pin/bit.
+  * __digitalIo<pin,defaultState>__: The main class, specify the I/O pin to attach to on the board, and the default electrical level at which the sensor or output is off.
+  * __digitalIoAvr<port, portBit, defaultState>__: The alternate class for AVR microcontrollers (Uno, Mega, AtTiny...), you must specify the port letter in uppercase, and the port's pin/bit.
 * Configuration Methods
-** __inputMode__: The pin is an input to read, in high impedance mode, voltage will just float (no pullup resistor)
-** __inputPullupMode__: The pin is an input to read with a pull-up resistor. The rest state is usually HIGH.
-** __outputMode__: The pin is an output to write to.
+  * __inputMode__: The pin is an input to read, in high impedance mode, voltage will just float (no pullup resistor)
+  * __inputPullupMode__: The pin is an input to read with a pull-up resistor. The rest state is usually HIGH.
+  * __outputMode__: The pin is an output to write to.
 * Input
-** __lastValue__: get the last value read on the port
-** __read__: read the value on the port, without processing (returns HIGH or LOW)
-** __isOff__: read the value on the port, return true if it is in the default level
-** __isOn__: read the value on the port, return true if it is not in the default level
-** __triggered__: read a debounced value on the port and return true if a transient signal was detected (any brief change of levels)
-** __changed__: read a debounced value on the port and return 1 if it changed to on, -1 if it changed to off, and 0 if there was no change
+  * __lastValue__: get the last value read on the port
+  * __read__: read the value on the port, without processing (returns HIGH or LOW)
+  * __isOff__: read the value on the port, return true if it is in the default level
+  * __isOn__: read the value on the port, return true if it is not in the default level
+  * __triggered__: read a debounced value on the port and return true if a transient signal was detected (any brief change of levels)
+  * __changed__: read a debounced value on the port and return 1 if it changed to on, -1 if it changed to off, and 0 if there was no change
 * Output
-** __write__: write a value on the port (HIGH or LOW)
-** __turnOn__: write a non-default value on the port
-** __turnOff__: write a default value on the port
+  * __write__: write a value on the port (HIGH or LOW)
+  * __turnOn__: write a non-default value on the port
+  * __turnOff__: write a default value on the port
 * Configuration macros
-** __DIGITAL_IO_DEBUG__: turn on debugging mode (1, 2, 3, or 4)
-** __DIGITAL_IO_DEBOUNCE_DELAY__: Override how long to debounce the signal
-** __DIGITAL_IO_DEBOUNCE_LOOP_DELAY__: How long to wait between each sampling of the pin during debouncing
+  * __DIGITAL_IO_DEBUG__: turn on debugging mode (1, 2, 3, or 4)
+  * __DIGITAL_IO_DEBOUNCE_DELAY__: Override how long to debounce the signal
+  * __DIGITAL_IO_DEBOUNCE_LOOP_DELAY__: How long to wait between each sampling of the pin during debouncing
 
 ## Memory usage
 
