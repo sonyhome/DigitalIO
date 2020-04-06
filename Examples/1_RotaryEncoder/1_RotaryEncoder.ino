@@ -20,7 +20,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 // These macros can be used to change the behavior of the DigitalIO library
-//#define DIGITAL_IO_DEBUG 3
+#define DIGITAL_IO_DEBUG 3
 //#define DIGITAL_IO_DEBOUNCE_DELAY 200
 
 #include <DigitalIO.hpp>
@@ -29,16 +29,15 @@
 volatile int32_t encoderData = 0;
 
 // Polling mode:
-//digitalRotaryEncoder<5,4,3,-16,16,false, encoderData> encoder;
-
-// Interrupt mode
+digitalRotaryEncoder<5,4,3,-16,16,false, encoderData> encoder;
+// Interrupt mode:
 //digitalRotaryEncoder<5,4,3,-16,16,true, encoderData> encoder;
-digitalIo<13, LOW> led;
-
 // AVR Polling mode:
-digitalRotaryEncoderAvr<'D',5,'D',4,'D',3,-16,16,false, 1, encoderData> encoder;
+//digitalRotaryEncoderAvr<'D',5,'D',4,'D',3,-16,16,false, 1, encoderData> encoder;
 // AVR Interrupt mode:
 //digitalRotaryEncoderAvr<'D',5,'D',4,'D',3,-16,16,true, 1, encoderData> encoder;
+
+digitalIo<13, LOW> led;
 //digitalIoAvr<'B', 5, LOW> led;
 
 void setup() {

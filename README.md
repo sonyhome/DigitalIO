@@ -18,6 +18,7 @@ This library can be used for any digital pin input signal, from sensors such as:
 * KY-017 Mercury Switch
 * A3144 Hall sensor switch
 * KS0038 Reed Switch
+* Rotary Encoders
 etc.
 
 You could use native Arduino digitalRead() or digitalWrite() directly to perform I/O on digital pins but it would be messier code and would not handle debounce.
@@ -97,6 +98,15 @@ When using a knock sensor or similar event detection sensor, they typically will
 Note: Your loop needs to be fast enough to run through the knock detection fuction before the transitory signal disappears, else you might not detect it. This will be dependent on how you code your main loop.
 
 ![0_Debounce with a knock sensor](Images/KnockSensor.png)
+
+## 1_Rotary_Encoder example
+Rotary encoders are usefuly to change a counter. It is explained for example on [howtomechatronics](https://howtomechatronics.com/tutorials/arduino/rotary-encoder-works-use-arduino/).
+![Rotary Encoder](https://howtomechatronics.com/wp-content/uploads/2016/07/Rotary-Encoder-Arduino-Tutorial-Example.jpg)
+
+The example shows on the Serial port the current rotary button value when the rotary button is pressed down.
+To see the value as it is updated, comment out the debug mode.
+
+Note that rotary encoders have their own class. This is needed because they use 3 pins, and can use interrupt handlers.
 
 ## Example A: Button
 
