@@ -98,6 +98,7 @@
 // avoid virtualizing read/write which would prevent inlining and slow toe code
 ////////////////////////////////////////////////////////////////////////////////
 #include <stdint.h>
+#include <util/atomic.h> // ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -114,9 +115,9 @@
 #ifdef DIGITAL_IO_DEBUG
 #warning DIGITAL_IO_DEBUG mode is set
 static_assert(DIGITAL_IO_DEBUG >= 0 && DIGITAL_IO_DEBUG <= 4);
-#define DEBUG_PRINT1(text) {if (DIGITAL_IO_DEBUG && 1 == 1) {Serial.print(text);}}
-#define DEBUG_PRINT2(text) {if (DIGITAL_IO_DEBUG && 2 == 2) {Serial.print(text);}}
-#define DEBUG_PRINT3(text) {if (DIGITAL_IO_DEBUG == 3) {Serial.print(text);}}
+#define DEBUG_PRINT1(text) {if ((DIGITAL_IO_DEBUG & 1) != 0) {Serial.print(text);}}
+#define DEBUG_PRINT2(text) {if ((DIGITAL_IO_DEBUG & 2) != 0) {Serial.print(text);}}
+#define DEBUG_PRINT3(text) {if ((DIGITAL_IO_DEBUG & 3) != 0) {Serial.print(text);}}
 constexpr bool DEBUG_MODE = (DIGITAL_IO_DEBUG > 1);
 #else
 constexpr bool DEBUG_MODE = false;
@@ -176,7 +177,9 @@ public:
   ////////////////////////////////////////////////////////////
   inline void inputMode(void)
   {
-    DEBUG_PRINT1("  pinMode(pinNumber, INPUT);\n");
+    DEBUG_PRINT1("  pinMode(");
+    DEBUG_PRINT1(pinNumber);
+    DEBUG_PRINT1(", INPUT);\n");
     pinMode(pinNumber, INPUT);
   }
 
@@ -186,7 +189,9 @@ public:
   ////////////////////////////////////////////////////////////
   inline void inputPullupMode(void)
   {
-    DEBUG_PRINT1("  pinMode(pinNumber, INPUT_PULLUP);\n");
+    DEBUG_PRINT1("  pinMode(");
+    DEBUG_PRINT1(pinNumber);
+    DEBUG_PRINT1(", INPUT_PULLUP);\n");
     pinMode(pinNumber, INPUT_PULLUP);
   }
 
@@ -196,7 +201,9 @@ public:
   ////////////////////////////////////////////////////////////
   inline void outputMode(void)
   {
-    DEBUG_PRINT1("  pinMode(pinNumber, OUTPUT);\n");
+    DEBUG_PRINT1("  pinMode(");
+    DEBUG_PRINT1(pinNumber);
+    DEBUG_PRINT1(", OUTPUT);\n");
     pinMode(pinNumber, OUTPUT);
   }
 
@@ -228,25 +235,6 @@ public:
   ////////////////////////////////////////////////////////////
   digitalIo()
   {
-    if (DEBUG_MODE)
-    {
-      Serial.begin(9600);
-    }
-    DEBUG_PRINT1("digitalIo<");
-    DEBUG_PRINT1(pinNumber);
-    DEBUG_PRINT1(",");
-    DEBUG_PRINT1(defaultState);
-    DEBUG_PRINT1(">\n");
-
-    DEBUG_PRINT1(LOW);
-    DEBUG_PRINT1(" <-\n");
-    DEBUG_PRINT1(HIGH);
-    DEBUG_PRINT1(" <-\n");
-    DEBUG_PRINT1(INPUT_PULLUP);
-    DEBUG_PRINT1(" <-\n");
-    DEBUG_PRINT1(LOW);
-    DEBUG_PRINT1(" <-\n");
-
     // Pin 13 is usually attached to an LED & resistor so can't use the pullup
     if (defaultState == HIGH && pinNumber != 13)
     {
@@ -430,6 +418,209 @@ public:
 
 
 ////////////////////////////////////////////////////////////////////////////////
+// @brief
+// should be used to use a rotary encoder
+//
+// I used the following web page to make this class. Notice how this code is
+// more compact than theirs because of the DigitalIO class. Furthermore it
+// is also protected from glitches coming from noisy signals that may be
+// an issue with worn rotary knobs.
+// https://howtomechatronics.com/tutorials/arduino/rotary-encoder-works-use-arduino/
+//
+// Template parameters:
+// The rotary encoder uses 3 pins, for the pushbutton switch (Sw),
+// clock and data signals (Ck, Dt) also called channel A and B.
+// The code supports limiting the rotary encoder to a [min, max] range of values
+// and can be monitored by an interrupt handler, or with the main loop polling
+// the pins. In the latter case the loop should be as fast as possible (<10ms).
+// The user must also provide an int32_t variable that will be used to store
+// internal data.
+// The reason of this store variable is to support interrupt handlers which need
+// a global variable with aknown address at compile time. The class itself can't
+// provide that unless it uses a static variable, but then it is shared by all
+// the instances of the class. The ISR itself is a static function. By passing
+// it in the template we instantiate the class itself and each variable is a
+// different type with separate constants: The code is duplicated.
+////////////////////////////////////////////////////////////////////////////////
+template<uint8_t pinNumberSw, uint8_t pinNumberDt, uint8_t pinNumberCk, int32_t min, int32_t max, bool useInterrupt, volatile int32_t & store>
+class digitalRotaryEncoder : public digitalIo<pinNumberSw, HIGH>
+{
+protected:
+  static constexpr int32_t MASK = (int32_t)((~0UL)^1UL);
+  static_assert(MASK == 0xFFFFfffe);
+
+  ////////////////////////////////////////////////////////////
+  // @brief
+  // Hardware specific config routine
+  ////////////////////////////////////////////////////////////
+  inline void setRotaryMode()
+  {
+    if (DEBUG_MODE)
+    {
+      pinMode(pinNumberCk, INPUT);
+      pinMode(pinNumberDt, INPUT);
+    }
+  }
+
+  ////////////////////////////////////////////////////////////
+  // @brief
+  // Hardware specific read routine for clock pin
+  ////////////////////////////////////////////////////////////
+  static inline uint8_t readCk(void)
+  {
+    return digitalRead(pinNumberCk);
+  }
+  
+  ////////////////////////////////////////////////////////////
+  // @brief
+  // Hardware specific read routine for data pin
+  ////////////////////////////////////////////////////////////
+  static inline uint8_t readDt(void)
+  {
+    return digitalRead(pinNumberDt);
+  }
+  
+  ////////////////////////////////////////////////////////////
+  // @brief
+  // Decode the rotary value from the store. The value is
+  // shifted left by 1 bit and stored on 31 bits.
+  ////////////////////////////////////////////////////////////
+  static inline int32_t getValue()
+  {
+    return (MASK & store)/2;
+  }
+
+  ////////////////////////////////////////////////////////////
+  // @brief
+  // Extract the last clock when the rotary value was updated
+  // encoded as the lsbit in the store.
+  ////////////////////////////////////////////////////////////
+  static inline uint8_t getClock()
+  {
+    return (store & 0x01) ? HIGH : LOW;
+  }
+
+  ////////////////////////////////////////////////////////////
+  // @brief
+  // Update the store with the current value and clock bit.
+  ////////////////////////////////////////////////////////////
+  static inline int32_t setStore(int32_t val, uint8_t ck)
+  {
+    store = (val * 2) | (ck == HIGH);
+  }
+
+  ////////////////////////////////////////////////////////////
+  // @brief
+  // Hardware specific read routine
+  ////////////////////////////////////////////////////////////
+  static inline int32_t rotaryUpdate()
+  {
+    int32_t val = getValue();
+
+    // Extract the previous clock from the lowest bit
+    const uint8_t prevCk = getClock();
+    const uint8_t ck = readCk();
+    if (prevCk == ck) {
+      // no clock edge or glitch: unchanged value
+      return val;
+    }
+
+    const uint8_t dt = readDt();
+    if (ck != dt)
+    {
+      // Clockwise
+      if (val < max)
+      {
+        DEBUG_PRINT2("U");
+        val++;
+      }
+    }
+    else
+    {
+      // Counter clockwise
+      if (val > min)
+      {
+        DEBUG_PRINT2("D");
+        val--;
+      }
+    }
+
+    // Reencode the clock on lowest bit and value on 31 bits
+    setStore(val, ck);
+    DEBUG_PRINT2(val);
+    DEBUG_PRINT2("\n");
+    return val;
+  }
+
+  ////////////////////////////////////////////////////////////
+  // @brief
+  // Interrupt service routine to read rotary encoder.
+  // No debounce, we read the values as-is & update counter
+  // Note: We use a template to pass the pointer to the class
+  // instance value to update with the pin interrupting.
+  ////////////////////////////////////////////////////////////
+  static void rotaryISR(void)
+  {
+    (void) rotaryUpdate();
+  }
+
+public:
+  ////////////////////////////////////////////////////////////
+  // @brief
+  // Constructor
+  // Attaches the interrupt handler
+  // If the rotary encoder can be interrupt driven it's better
+  // (Uno, Nano, Duo... but not AtTiny)
+  // Not all chips can have interrupts on all pins, check the
+  // board's documentation.
+  ////////////////////////////////////////////////////////////
+  digitalRotaryEncoder(void)
+  {
+    if (DEBUG_MODE)
+    {
+      // IO defaults to input, in debug mode force it.
+      setRotaryMode();
+    }
+
+    if (useInterrupt)
+    {
+      // Trigger interrupt on both rising and falling edges of the clock
+      // Options: RISING, FALLING, CHANGE
+      attachInterrupt(digitalPinToInterrupt(pinNumberCk), rotaryISR, CHANGE);
+    }
+  }
+
+  ////////////////////////////////////////////////////////////
+  // @brief
+  // Track and return the rotary encoder current value.
+  // If the encoder is tracked with an interrupt it just
+  // reports it, if not it reads the encoder to detect changes
+  // In that case the value is stored only on 31 bits, and
+  // this routine must be called repetively fast (no call to
+  // delay()) to poll the rotary encoder reliably.
+  ////////////////////////////////////////////////////////////
+  int8_t rotaryRead()
+  {
+    if (!useInterrupt)
+    {
+      return rotaryUpdate();
+    }
+    else
+    {
+      int32_t val;
+      ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+        // Read value without risk of ISR updating it at same time
+        // Keep this code block to a minimum size
+        val = getValue();
+      }
+      return val;
+    }
+  }
+}; // digitalRotaryEncoder
+
+
+
+////////////////////////////////////////////////////////////////////////////////
 /// digitalIoAvr is only available on AVR artchitecture. For other architectures
 /// use digitalIo.
 ///
@@ -558,7 +749,11 @@ public:
   ////////////////////////////////////////////////////////////
   inline void inputMode(void)
   {
-    DEBUG_PRINT1("  pinMode(portPin, INPUT);\n");
+    DEBUG_PRINT1("  AVR_SET_AS_IN(");
+    DEBUG_PRINT1(portName);
+    DEBUG_PRINT1(",");
+    DEBUG_PRINT1(portPin);
+    DEBUG_PRINT1(");\n");
     AVR_SET_AS_IN(portName, portPin);
   }
 
@@ -568,8 +763,12 @@ public:
   ////////////////////////////////////////////////////////////
   inline void inputPullupMode(void)
   {
-    DEBUG_PRINT1("  pinMode(portPin, INPUT_PULLUP);\n");
-    AVR_SET_AS_IN(portName, portPin);
+    inputMode();
+    DEBUG_PRINT1("  AVR_SET_HIGH(");
+    DEBUG_PRINT1(portName);
+    DEBUG_PRINT1(",");
+    DEBUG_PRINT1(portPin);
+    DEBUG_PRINT1(");\n");
     AVR_SET_HIGH(portName, portPin);
   }
 
@@ -579,7 +778,11 @@ public:
   ////////////////////////////////////////////////////////////
   inline void outputMode(void)
   {
-    DEBUG_PRINT1("  pinMode(portPin, OUTPUT);\n");
+    DEBUG_PRINT1("  AVR_SET_AS_OUT(");
+    DEBUG_PRINT1(portName);
+    DEBUG_PRINT1(",");
+    DEBUG_PRINT1(portPin);
+    DEBUG_PRINT1(");\n");
     AVR_SET_AS_OUT(portName, portPin);
   }
 
@@ -611,27 +814,6 @@ public:
   ////////////////////////////////////////////////////////////
   digitalIoAvr()
   {
-    if (DEBUG_MODE)
-    {
-      Serial.begin(9600);
-    }
-    DEBUG_PRINT1("digitalIoAvr<");
-    DEBUG_PRINT1(portName);
-    DEBUG_PRINT1(",");
-    DEBUG_PRINT1(portPin);
-    DEBUG_PRINT1(",");
-    DEBUG_PRINT1(defaultState);
-    DEBUG_PRINT1(">\n");
-
-    DEBUG_PRINT1(LOW);
-    DEBUG_PRINT1(" <-\n");
-    DEBUG_PRINT1(HIGH);
-    DEBUG_PRINT1(" <-\n");
-    DEBUG_PRINT1(INPUT_PULLUP);
-    DEBUG_PRINT1(" <-\n");
-    DEBUG_PRINT1(LOW);
-    DEBUG_PRINT1(" <-\n");
-
     if (defaultState == HIGH)
     {
       inputPullupMode();
@@ -811,6 +993,206 @@ public:
     return 1;
   }
 }; // digitalIoAvr
+
+
+////////////////////////////////////////////////////////////////////////////////
+// @brief
+// should be used to use a rotary encoder
+//
+// I used the following web page to make this class. Notice how this code is
+// more compact than theirs because of the DigitalIO class. Furthermore it
+// is also protected from glitches coming from noisy signals that may be
+// an issue with worn rotary knobs.
+// https://howtomechatronics.com/tutorials/arduino/rotary-encoder-works-use-arduino/
+//
+// For AVR, instead of specifying a pin you specify a port letter and pin.
+// 
+// To use the AVR version you need to provide the interruptVector number.
+// On Arduino UNO:
+//   INT0_vect for D2 (pin 2)
+//   INT1_vect for D3 (pin 3)
+// http://www.gammon.com.au/interrupts
+////////////////////////////////////////////////////////////////////////////////
+template<char portNameSw, uint8_t portPinSw,
+         char portNameDt, uint8_t portPinDt,
+         char portNameCk, uint8_t portPinCk,
+         int32_t min, int32_t max,
+         bool useInterrupt, uint8_t interruptVector,
+         volatile int32_t & store>
+class digitalRotaryEncoderAvr : public digitalIoAvr<portNameSw, portPinSw, HIGH>
+{
+protected:
+  static constexpr int32_t MASK = (int32_t)((~0UL)^1UL);
+  static_assert(MASK == 0xFFFFfffe);
+
+  ////////////////////////////////////////////////////////////
+  // @brief
+  // Hardware specific config routine
+  ////////////////////////////////////////////////////////////
+  inline void setRotaryMode()
+  {
+    if (DEBUG_MODE)
+    {
+      AVR_SET_AS_IN(portNameDt, portPinDt);
+      AVR_SET_AS_IN(portNameCk, portPinCk);
+    }
+  }
+
+  ////////////////////////////////////////////////////////////
+  // @brief
+  // Hardware specific read routine for clock pin
+  ////////////////////////////////////////////////////////////
+  static inline uint8_t readCk(void)
+  {
+    return AVR_READ(portNameCk, portPinCk);
+  }
+  
+  ////////////////////////////////////////////////////////////
+  // @brief
+  // Hardware specific read routine for data pin
+  ////////////////////////////////////////////////////////////
+  static inline uint8_t readDt(void)
+  {
+    return AVR_READ(portNameDt, portPinDt);
+  }
+  
+  ////////////////////////////////////////////////////////////
+  // @brief
+  // Decode the rotary value from the store. The value is
+  // shifted left by 1 bit and stored on 31 bits.
+  ////////////////////////////////////////////////////////////
+  static inline int32_t getValue()
+  {
+    return (MASK & store)/2;
+  }
+
+  ////////////////////////////////////////////////////////////
+  // @brief
+  // Extract the last clock when the rotary value was updated
+  // encoded as the lsbit in the store.
+  ////////////////////////////////////////////////////////////
+  static inline uint8_t getClock()
+  {
+    return (store & 0x01) ? HIGH : LOW;
+  }
+
+  ////////////////////////////////////////////////////////////
+  // @brief
+  // Update the store with the current value and clock bit.
+  ////////////////////////////////////////////////////////////
+  static inline int32_t setStore(int32_t val, uint8_t ck)
+  {
+    store = (val * 2) | (ck == HIGH);
+  }
+
+  ////////////////////////////////////////////////////////////
+  // @brief
+  // Hardware specific read routine
+  ////////////////////////////////////////////////////////////
+  static inline int32_t rotaryUpdate()
+  {
+    int32_t val = getValue();
+
+    // Extract the previous clock from the lowest bit
+    const uint8_t prevCk = getClock();
+    const uint8_t ck = readCk();
+    if (prevCk == ck) {
+      // no clock edge or glitch: unchanged value
+      return val;
+    }
+
+    const uint8_t dt = readDt();
+    if (ck != dt)
+    {
+      // Clockwise
+      if (val < max)
+      {
+        DEBUG_PRINT2("U");
+        val++;
+      }
+    }
+    else
+    {
+      // Counter clockwise
+      if (val > min)
+      {
+        DEBUG_PRINT2("D");
+        val--;
+      }
+    }
+
+    // Reencode the clock on lowest bit and value on 31 bits
+    setStore(val, ck);
+    DEBUG_PRINT2(val);
+    DEBUG_PRINT2("\n");
+    return val;
+  }
+
+  ////////////////////////////////////////////////////////////
+  // @brief
+  // Interrupt service routine to read rotary encoder.
+  // No debounce, we read the values as-is & update counter
+  // Note: We use a template to pass the pointer to the class
+  // instance value to update with the pin interrupting.
+  ////////////////////////////////////////////////////////////
+  static void rotaryISR(void)
+  {
+    (void) rotaryUpdate();
+  }
+
+public:
+  ////////////////////////////////////////////////////////////
+  // @brief
+  // Constructor
+  // Attaches the interrupt handler
+  // If the rotary encoder can be interrupt driven it's better
+  // (Uno, Nano, Duo... but not AtTiny)
+  // Not all chips can have interrupts on all pins, check the
+  // board's documentation.
+  ////////////////////////////////////////////////////////////
+  digitalRotaryEncoderAvr(void)
+  {
+    if (DEBUG_MODE)
+    {
+      // IO defaults to input, in debug mode force it.
+      setRotaryMode();
+    }
+
+    if (useInterrupt)
+    {
+      // Trigger interrupt on both rising and falling edges of the clock
+      // Options: RISING, FALLING, CHANGE
+      attachInterrupt(interruptVector, rotaryISR, CHANGE);
+    }
+  }
+
+  ////////////////////////////////////////////////////////////
+  // @brief
+  // Track and return the rotary encoder current value.
+  // If the encoder is tracked with an interrupt it just
+  // reports it, if not it reads the encoder to detect changes
+  // In that case the value is stored only on 31 bits, and
+  // this routine must be called repetively fast (no call to
+  // delay()) to poll the rotary encoder reliably.
+  ////////////////////////////////////////////////////////////
+  int8_t rotaryRead()
+  {
+    if (!useInterrupt)
+    {
+      return rotaryUpdate();
+    }
+    else
+    {
+      int32_t val;
+      ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+        // Read value without risk of ISR updating it at same time
+        // Keep this code block to a minimum size
+        val = getValue();
+      }
+      return val;
+    }
+  }
+}; // digitalRotaryEncoder
 #endif // ARDUINO_ARCH_AVR
 
 #endif // DIGITAL_IO

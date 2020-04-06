@@ -1,5 +1,5 @@
 ////////////////////////////////////////////////////////////////////////////////
-// digitalPin demo
+// DigitalIO demo
 // A straightforward library to use digital switches on Arduinos
 ////////////////////////////////////////////////////////////////////////////////
 // Debounced switch example for Arduino Uno
@@ -8,7 +8,7 @@
 // being imperfect and temporarilly having imperfect noisy contacts.
 //
 // This demo runs 3 loops. Test your sensor in all 3 modes to see how it is
-// reported and decide which mode better suits your use case. To visualize the
+// reported and decide which mode better suits your sensor. To visualize the
 // detection open the Serial Console window (menu: Tools -> Serial Monitor).
 // Alernatively you can look at the built in LED on the Arduino Uno. It is
 // controlled by the "led" variable and will turn on when the button is pressed.
