@@ -6,27 +6,26 @@
 //
 // A Digital IO Library for Arduino
 //
-// The digitalIo class makes it easy to use buttons and switches on Arduino
+// The digitalIo library aims at simplifying use of devices and sensors attached
+// to the digital I/O pins. The main class is for simple single pin devices.
+// More complex devices have their own classes (rotary encoders and sonars).
 //
-// The DigitalvrPin has the same functionality but runs faster and compiled
-// code is more compact because it uses AVR ports directly instead of the
+// The Avr classes have the same functionality but compile smaller and run
+// faster as they directly reverence the AVR ports and their pins, bypassing the
 // Arduino abstraction layer.
 //
-// The library follow the same syntax as the Serial library class, with a
-// begin() method that initializes the I/O pin, and a read() routine that
-// returns true if the button is pressed, or debounce which implements a
-// simple debounce heuristic to avoid read glitches.
+// The library defines template classes declaring port parameters as constant 
+// to help code optimization.
 //
-// The class is a templace class, which allows you to create an instance
-// customized for the pin and type of switch you are using (on HIGH or
-// on when LOW).
-// The library defines one default switch on PORT B0.
+// Macros can override some built-in constants to help tune the library to the
+// use case (for example reduce the max debounce delay to 2ms for a good button
+// or extend it to 100ms for a noisy knock sensor).
 //
-// This template design allows the compiler to optimize away anything that
-// is not used.
-//
+// See the header of each class in DigitalIo.h and _DigitalIo.h for details.
 ////////////////////////////////////////////////////////////////////////////////
-// Wiring example for digitalIo<6, HIGH> as input (reading a switch):
+// Example:
+// Wiring for digitalIo<6, HIGH> as input (reading a switch).
+// When you press the switch, it conducts grounding pin 6 to LOW.
 //
 //           -- Switch
 // pin 6 ---o  o---.
@@ -34,30 +33,11 @@
 //                ---
 //                /// Gnd
 //
-// When you press the switch, it conducts grounding pin 6 to LOW.
-////////////////////////////////////////////////////////////////////////////////
-// Basic input uses:
-//
-// digitalIo<6, HIGH> button;
-// led.inputPullupMode();
-// if (button.isOn()) { handlePress();}
-// if (!button.isOff()) { handlePress();}
-// if (button.changed() == 1) { handlePress();}
-// button.changed(); if (button.value() == LOW) { handlePress();}
-// if (button.isTransitioned()) { handleKnockSensor();}
-//
-// Advanced override macros (set them before including the library):
-//
-// #define DIGITAL_IO_DEBUG true
-//   Enables debug mode
-// #define DIGITAL_IO_DEBOUNCE_DELAY 50
-//   Sets the debounce duration to 50msec
-//
-////////////////////////////////////////////////////////////////////////////////
-// Wiring example for digitalIo<6, LOW> as output (control a low power LED):
+// Wiring for digitalIo<7, LOW> as output (control a low power LED):
+// When you output HIGH, it turns on the LED
 //
 //          200 Ohm
-// pin 6 ---====---.
+// pin 7 ---====---.
 //                 |
 //                 V  23mA LED
 //                 -
@@ -65,1134 +45,832 @@
 //                ---
 //                /// Gnd
 //
-// When you output HIGH, it turns on the LED
-////////////////////////////////////////////////////////////////////////////////
-// Basic output uses:
+// Code turning on the LED with the push-button:
 //
-// digitalIo<6, LOW> led;
-// led.outputMode();
-// led.write(HIGH); // Turn on
-// led.turnOn(); // Turn on
-// led.turnOff(); // Turn off
-////////////////////////////////////////////////////////////////////////////////
-// Internals
-//
-// The code is separated into constants, which are fixed values that can be
-// modified by the end user if their sensor is too noisy, or the library too
-// slow for sensors with very little noise. For example, regular buttons may
-// work fine with 5ms debounce, but knock sensors might need 100msec to become
-// stable. The 30msec default should be reliable and fast enough for all
-// applications.
-//
-// The digitalIo class is used to access pins with their pin number as they
-// are defined by the Arduino ecosystem for your board (usually the number
-// printed next to the pin on the board). The class uses template constants
-// to declare them and the default state the port is in. This allows the
-// compiler to know these are constants, and optimize away all code that
-// depend on them. Simple routines are declared inline to hint the compiler to
-// not create function calls. The class only stores one byte of information per
-// instance/pin.
-//
-// Note: digitalIo and DigitalPort classes are identical except for their
-// constructors anre read/write functions. We don't use a parent class to
-// avoid virtualizing read/write which would prevent inlining and slow toe code
+// digitalIo<7, LOW> led;
+// digitalIo<6, HIGH> button;
+// setup() {
+//   led.outputMode();
+//   button.inputPullupMode();
+// }
+// loop() {
+//   if (button.isOn()) { led.turnOn();}
+//   if (!button.read() == LOW) { led.write(LOW);}
+//   if (button.isTransitioned()) { handleKnock();}
+//   if (button.changed() == 1) { handlePressed();}
+// }
 ////////////////////////////////////////////////////////////////////////////////
 #include <stdint.h>
+
+#ifdef ARDUINO_ARCH_AVR // AVR
+//#include <Arduino.h>
 #include <util/atomic.h> // ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
+#endif // ARDUINO_ARCH_AVR
+
+// Optimize code
+#pragma GCC optimize("-O2")
+
 
 
 ////////////////////////////////////////////////////////////////////////////////
-/// Constants
-/// These shouldn't need to be changed but may be overriden by the user
 ////////////////////////////////////////////////////////////////////////////////
-
+////////////////////////////////////////////////////////////////////////////////
 /// @brief
 /// DIGITAL_IO_DEBUG forces the library into debug mode
-/// 1: prints settings only
+/// 1: prints settings and raw I/O activity
 /// 2: prints transitions only
 /// 3: prints both
 /// 4: only forces pin initialization as input (usually the default, not needed)
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
 #ifdef DIGITAL_IO_DEBUG
 #warning DIGITAL_IO_DEBUG mode is set
-static_assert(DIGITAL_IO_DEBUG >= 0 && DIGITAL_IO_DEBUG <= 4);
+static_assert(DIGITAL_IO_DEBUG >= 0 && DIGITAL_IO_DEBUG <= 4,
+              "Use debug modes 0 to 4");
 #define DEBUG_PRINT1(text) {if ((DIGITAL_IO_DEBUG & 1) != 0) {Serial.print(text);}}
 #define DEBUG_PRINT2(text) {if ((DIGITAL_IO_DEBUG & 2) != 0) {Serial.print(text);}}
 #define DEBUG_PRINT3(text) {if ((DIGITAL_IO_DEBUG & 3) != 0) {Serial.print(text);}}
 constexpr bool DEBUG_MODE = (DIGITAL_IO_DEBUG > 1);
-#else
+#else // undefined DIGITAL_IO_DEBUG
 constexpr bool DEBUG_MODE = false;
 #define DEBUG_PRINT1(text)
 #define DEBUG_PRINT2(text)
 #define DEBUG_PRINT3(text)
+#endif // DIGITAL_IO_DEBUG
+
+
+
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+// AVR port manipulation
+// Controls code optimizations related to direct port I/O
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+#ifdef ARDUINO_ARCH_AVR
+
+#define DIGITAL_IO_AVR_DEFAULT 1
+#define DIGITAL_IO_AVR_OPTIMIZED 2
+
+////////////////////////////////////////////////////////////////////////////////
+// For AVR boards, the non-AVR specific classes using arduino pins can be
+// optimized by setting
+// DIGITAL_IO_AVR_PINMODE = DIGITAL_IO_AVR_OPTIMIZED
+// and can be made more standard/compatible with
+// DIGITAL_IO_AVR_PINMODE = DIGITAL_IO_AVR_DEFAULT (default)
+////////////////////////////////////////////////////////////////////////////////
+#ifndef DIGITAL_IO_AVR_PINMODE
+#define DIGITAL_IO_AVR_PINMODE DIGITAL_IO_AVR_DEFAULT
+#endif // DIGITAL_IO_AVR_PINMODE
+
+////////////////////////////////////////////////////////////////////////////////
+// For AVR boards, the AVR specific classes using AVR port names and port pins
+// can optimized by setting
+// DIGITAL_IO_AVR_PORTMODE = DIGITAL_IO_AVR_OPTIMIZED (default)
+// and can be made more standard/compatible with
+// DIGITAL_IO_AVR_PORTMODE = DIGITAL_IO_AVR_DEFAULT
+////////////////////////////////////////////////////////////////////////////////
+#ifndef DIGITAL_IO_AVR_PORTMODE
+#define DIGITAL_IO_AVR_PORTMODE DIGITAL_IO_AVR_OPTIMIZED
+#endif // DIGITAL_IO_AVR_PORTMODE
+
+////////////////////////////////////////////////////////////////////////////////
+// AVR port name constants.
+// These are used to convert a port name (for example D) to the port register
+// (for example PIND to read or PORTD to write).
+////////////////////////////////////////////////////////////////////////////////
+enum avrPorts
+{
+  A = 1,
+  B = 2, // AtTiny
+  C = 3,
+  D = 4, // Uno
+  E = 5,
+  F = 6,
+  G = 7, // Mega has NUM_DIGITAL_PINS == 70
+  H = 8,
+  J = 10,
+  K = 11,
+  L = 12,
+};
+
+////////////////////////////////////////////////////////////////////////////////
+// We can't use NOT_A_PORT as we can't write to it. It's hard to write a macro
+// if we can't allow NOT_A_PORT = value (that code would be optimized out).
+// So instead all invalid ports are redirected to a known always valid port.
+// @warn Using an invalid port on an AVR board will automatically replace the
+// bad port name to port B! This might cause unsuspected results. We use port B
+// because port A is usually an analog port, not a digital port.
+//
+// Arduino will define PIN* and PORT* that exist for the chosen board. For all
+// non existing ones the following defines them just for the purpose of not
+// having compilation errors.
+////////////////////////////////////////////////////////////////////////////////
+#define BAD_PIN_REGISTER  PINB
+#define BAD_PORT_REGISTER PORTB
+
+////////////////////////////////////////////////////////////////////////////////
+// Macros to define PIN* ports that do not exist for an AVR board as NOT_A_PORT
+////////////////////////////////////////////////////////////////////////////////
+#ifndef PINA
+#define PINA BAD_PIN_REGISTER
+#endif
+#ifndef PINB
+#define PINB BAD_PIN_REGISTER
+#endif
+#ifndef PINB
+#define PINB BAD_PIN_REGISTER
+#endif
+#ifndef PINC
+#define PINC BAD_PIN_REGISTER
+#endif
+#ifndef PIND
+#define PIND BAD_PIN_REGISTER
+#endif
+#ifndef PINE
+#define PINE BAD_PIN_REGISTER
+#endif
+#ifndef PINF
+#define PINF BAD_PIN_REGISTER
+#endif
+#ifndef PING
+#define PING BAD_PIN_REGISTER
+#endif
+#ifndef PINH
+#define PINH BAD_PIN_REGISTER
+#endif
+#ifndef PINJ
+#define PINJ BAD_PIN_REGISTER
+#endif
+#ifndef PINK
+#define PINK BAD_PIN_REGISTER
+#endif
+#ifndef PINL
+#define PINL BAD_PIN_REGISTER
 #endif
 
+////////////////////////////////////////////////////////////////////////////////
+// Macros to define PORT* ports that do not exist for an AVR board as NOT_A_PORT
+////////////////////////////////////////////////////////////////////////////////
+#ifndef PORTA
+#define PORTA BAD_PORT_REGISTER
+#endif
+#ifndef PORTB
+#define PORTB BAD_PORT_REGISTER
+#endif
+#ifndef PORTB
+#define PORTB BAD_PORT_REGISTER
+#endif
+#ifndef PORTC
+#define PORTC BAD_PORT_REGISTER
+#endif
+#ifndef PORTD
+#define PORTD BAD_PORT_REGISTER
+#endif
+#ifndef PORTE
+#define PORTE BAD_PORT_REGISTER
+#endif
+#ifndef PORTF
+#define PORTF BAD_PORT_REGISTER
+#endif
+#ifndef PORTG
+#define PORTG BAD_PORT_REGISTER
+#endif
+#ifndef PORTH
+#define PORTH BAD_PORT_REGISTER
+#endif
+#ifndef PORTJ
+#define PORTJ BAD_PORT_REGISTER
+#endif
+#ifndef PORTK
+#define PORTK BAD_PORT_REGISTER
+#endif
+#ifndef PORTL
+#define PORTL BAD_PORT_REGISTER
+#endif
+
+////////////////////////////////////////////////////////////////////////////////
+// Apply a command defined in APPLY_AVR_ACTION_TO_PORTS to every AVR port/pin.
+// At compile time the port&pin are constants, all but the relevant port code is
+// optimized away by the compiler, to generate fast code. This macro needs all
+// the port registers to be defined, hence the previous macros.
+// Use the ## operator to convert the port name to a register name as needed.
+//
+// Code usage:
+// #define AVR_PIN_ACTION(p,b) PORT ## p = 1<<b
+// APPLY_AVR_ACTION_TO_PORTS(port,pin);
+// #undef AVR_PIN_ACTION
+//
+// Assuming port D is used the switch statement at compile time is optimized to
+// just be: "PORTD = 1 << portBit;", because we call this where D is constant.
+////////////////////////////////////////////////////////////////////////////////
+#define APPLY_AVR_ACTION_TO_PORTS(portName, portBit) \
+  switch(portName) {                                 \
+    case A: AVR_PIN_ACTION(A, portBit); break;       \
+    case B: AVR_PIN_ACTION(B, portBit); break;       \
+    case C: AVR_PIN_ACTION(C, portBit); break;       \
+    case D: AVR_PIN_ACTION(D, portBit); break;       \
+    case E: AVR_PIN_ACTION(E, portBit); break;       \
+    case F: AVR_PIN_ACTION(F, portBit); break;       \
+    case G: AVR_PIN_ACTION(G, portBit); break;       \
+    case H: AVR_PIN_ACTION(H, portBit); break;       \
+    case J: AVR_PIN_ACTION(J, portBit); break;       \
+    case K: AVR_PIN_ACTION(K, portBit); break;       \
+    case L: AVR_PIN_ACTION(L, portBit); break;       \
+    default: break; }
+
+#endif // ARDUINO_ARCH_AVR
+
+
+
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+// Interrupt wrapper routines hack
+// The classes can attach interrupt handlers (ISR) to the DigitalIO pins they
+// are attached to.
+// For AVR we want to find the interrupt number for a port/pin. It is not
+// possible to get directly from the Arduino infrastructure without using the
+// PROGMEM tables which is slow. Hence the pinToIrqAvr does its best to find
+// the interrupt for port/pins of the most common AVR boards.
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+
+////////////////////////////////////////////////////////////////////////////////
+// @brief
+// Wrapper routines to find the interrupt attached to a digital pin. If the pin
+// has none, returns NOT_AN_INTERRUPT (-1 or 255).
+// This routine just encapsulates the digitalPinToInterrupt() built-in macro.
+////////////////////////////////////////////////////////////////////////////////
+inline uint8_t pinToIrq(uint8_t pin)
+{
+  return digitalPinToInterrupt(pin);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// @brief
+// Wrapper routines to find the interrupt attached to a digital pin. If the pin
+// has none, returns NOT_AN_INTERRUPT (-1 or 255).
+// This is a hack cobbled up from some variants/*/pins_arduino.h, meant only for
+// AVR boards 
+// @todo: Implement a slow fail-safe method using PROGMEM tables
+////////////////////////////////////////////////////////////////////////////////
+#ifdef ARDUINO_ARCH_AVR
+inline uint8_t pinToIrqAvr(uint8_t port, uint8_t pin)
+{
+  uint8_t irq = NOT_AN_INTERRUPT;
+
+  #if NUM_DIGITAL_PINS < 20
+  if (port == B && pin == 2)
+  {
+    irq = 0; // AtTiny*
+  }
+  #elif NUM_DIGITAL_PINS < 70
+  if (port == D)
+  {
+    switch(pin)
+    {
+      // Uno
+      case 0: irq = 0; break;
+      case 1: irq = 1; break;
+      // Leonardo
+      case 2: irq = 2; break;
+      case 3: irq = 3; break;
+      case 6: irq = 4; break;
+    }
+  }
+  #else // MEGA
+  if (port == D)
+  {
+    if (pin < 3) { irq = pin+2; }
+  }
+  else if (port == E)
+  {
+    if (pin == 4) { irq = 0; }
+    if (pin == 5) { irq = 1; }
+  }
+  #endif // NUM_DIGITAL_PINS
+  DEBUG_PRINT1(irq);
+  DEBUG_PRINT1("= pinToIrqAvr(");
+  DEBUG_PRINT1(port);
+  DEBUG_PRINT1(",");
+  DEBUG_PRINT1(pin);
+  DEBUG_PRINT1(");");
+  return irq;
+}
+#endif // ARDUINO_ARCH_AVR
+
+
+
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+// @brief (for AVR boards only)
+// Internal class (do not use directly)
+// CLASS digitalIoRaw defines RAW I/O primitives and should not be used as-is.
+// Supports
+// * AVR via pinId
+// * AVR via portName, portId
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+#ifdef ARDUINO_ARCH_AVR
+class digitalIoRaw
+{
+public:
+  ////////////////////////////////////////////////////////////
+  // @brief
+  // AVR specific config routine via pinId
+  ////////////////////////////////////////////////////////////
+  static inline void inputModeRaw(uint8_t pinId)
+  {
+    // We can't optimize out the pinId function calls because they
+    // dereference config tables stored in PROGMEM. Re-hardcoding
+    // digitalPinTo* is board dependend so we won't do that here.
+    // It also seems like it saves memory to call them in the functions
+    // instead of the constructor so we do that (2476B vs 2608B SRAM,
+    // 336B vs 349B DRAM). digitalIoAvr uses 2250B/337B because the
+    // PORT and BIT don't need to be converted with a PROGMEM table.
+    // Savings are 5% and 14% respectively!
+
+    #if DIGITAL_IO_AVR_PINMODE != DIGITAL_IO_AVR_DEFAULT
+      const uint8_t portBit = digitalPinToBitMask(pinId);
+      const uint8_t portName = digitalPinToPort(pinId);
+      inputModeRaw(portName, portBit);
+    #else
+      DEBUG_PRINT1("pinmode(");
+      DEBUG_PRINT1(pinId);
+      DEBUG_PRINT1(", INPUT)\n");
+      pinMode(pinId, INPUT);
+    #endif
+  }
+  ////////////////////////////////////////////////////////////
+  // AVR specific config routine via portName, portBit
+  ////////////////////////////////////////////////////////////
+  static inline void inputModeRaw(uint8_t portName, uint8_t portBit)
+  {
+    *portModeRegister(portName) &= 0xFFU ^ (1U << portBit); // I
+    DEBUG_PRINT1("inputModeRaw => ");
+    DEBUG_PRINT1(*portModeRegister(portName));
+    DEBUG_PRINT1("= *portModeRegister(");
+    DEBUG_PRINT1(portName);
+    DEBUG_PRINT1(") &= ");
+    DEBUG_PRINT1(0xFFU ^ (1U << portBit));
+    DEBUG_PRINT1("; IN\n");
+  }
+
+  ////////////////////////////////////////////////////////////
+  // @brief
+  // AVR specific config routine via pinId
+  ////////////////////////////////////////////////////////////
+  static inline void inputPullupModeRaw(uint8_t pinId)
+  {
+    #if DIGITAL_IO_AVR_PINMODE != DIGITAL_IO_AVR_DEFAULT
+      const uint8_t portBit = digitalPinToBitMask(pinId);
+      const uint8_t portName = digitalPinToPort(pinId);
+      inputPullupModeRaw(portName, portBit);
+    #else
+      DEBUG_PRINT1("pinmode(");
+      DEBUG_PRINT1(pinId);
+      DEBUG_PRINT1(", INPUT_PULLUP)\n");
+      pinMode(pinId, INPUT_PULLUP);
+    #endif
+  }
+  ////////////////////////////////////////////////////////////
+  // AVR specific config routine via portName, portBit
+  ////////////////////////////////////////////////////////////
+  static inline void inputPullupModeRaw(uint8_t portName, uint8_t portBit)
+  {
+    inputModeRaw(portName, portBit);
+    *portOutputRegister(portName) |= (1U <<portBit); // H
+    DEBUG_PRINT1("inputPullupModeRaw => ");
+    DEBUG_PRINT1(*portOutputRegister(portName));
+    DEBUG_PRINT1("= *portOutputRegister(");
+    DEBUG_PRINT1(portName);
+    DEBUG_PRINT1(") |= ");
+    DEBUG_PRINT1(1U << portBit);
+    DEBUG_PRINT1("; HIGH\n");
+  }
+
+  ////////////////////////////////////////////////////////////
+  // @brief
+  // AVR specific config routine via pinId
+  ////////////////////////////////////////////////////////////
+  static inline void outputModeRaw(uint8_t pinId)
+  {
+    #if DIGITAL_IO_AVR_PINMODE != DIGITAL_IO_AVR_DEFAULT
+      const uint8_t portBit = digitalPinToBitMask(pinId);
+      const uint8_t portName = digitalPinToPort(pinId);
+      outputModeRaw(portName, portBit);
+    #else
+      DEBUG_PRINT1("pinmode(");
+      DEBUG_PRINT1(pinId);
+      DEBUG_PRINT1(", OUTPUT)\n");
+      pinMode(pinId, OUTPUT);
+    #endif
+  }
+  ////////////////////////////////////////////////////////////
+  // AVR specific config routine via portName, portBit
+  ////////////////////////////////////////////////////////////
+  static inline void outputModeRaw(uint8_t portName, uint8_t portBit)
+  {
+    *portModeRegister(portName) |= (1U << portBit); // O
+    DEBUG_PRINT1("outputModeRaw => ");
+    DEBUG_PRINT1(*portModeRegister(portName));
+    DEBUG_PRINT1("= *portModeRegister(");
+    DEBUG_PRINT1(portName);
+    DEBUG_PRINT1(") |= ");
+    DEBUG_PRINT1(1U << portBit);
+    DEBUG_PRINT1("; OUT\n");
+  }
+
+  ////////////////////////////////////////////////////////////
+  // @brief
+  // AVR specific read routine via pinId
+  ////////////////////////////////////////////////////////////
+  static inline uint8_t readRaw(uint8_t pinId)
+  {
+    uint8_t val;
+    DEBUG_PRINT1("readRaw => ");
+    #if DIGITAL_IO_AVR_PINMODE != DIGITAL_IO_AVR_DEFAULT
+      // Slightly smaller code 2682 vs 2754 and likely faster
+      const uint8_t portBit = digitalPinToBitMask(pinId);
+      const uint8_t portName = digitalPinToPort(pinId);
+      val = *portInputRegister(portName);
+      DEBUG_PRINT1(val);
+      DEBUG_PRINT1(" ");
+      val = ((val & portBit) != 0) ? HIGH : LOW;
+      DEBUG_PRINT1(val);
+      DEBUG_PRINT1(" = ((*portInputRegister(");
+      DEBUG_PRINT1(portName);
+      DEBUG_PRINT1(") & ");
+      DEBUG_PRINT1(portBit);
+      DEBUG_PRINT1(" != 0)\n");
+      return val;
+    #else
+      val = digitalRead(pinId);
+      DEBUG_PRINT1(val);
+      DEBUG_PRINT1(" = digitalRead(");
+      DEBUG_PRINT1(pinId);
+      DEBUG_PRINT1(")\n");
+      return val;
+    #endif // DIGITAL_IO_AVR_PINMODE
+  }
+  ////////////////////////////////////////////////////////////
+  // AVR specific read routine via portName, portBit
+  // If portBit, portName are computed from pinId then it is
+  // more efficient to use portInputRegister (dereferences a
+  // table in PROGMEM).
+  // If they are given directly from constants then the switch
+  // statement compiles away to a single line with constants
+  // accessing  the port directly.
+  ////////////////////////////////////////////////////////////
+  static inline uint8_t readRaw(uint8_t portName, uint8_t portBit)
+  {
+    uint8_t val;
+    DEBUG_PRINT1("readRaw => ");
+    #if DIGITAL_IO_AVR_PORTMODE == DIGITAL_IO_AVR_OPTIMIZED
+      // For all ports, perform AVR_PIN_ACTION, which is a read of the pin
+      #define AVR_PIN_ACTION(portName, portBit) val = PIN ## portName
+      APPLY_AVR_ACTION_TO_PORTS(portName, portBit);
+      #undef AVR_PIN_ACTION
+      DEBUG_PRINT1(val);
+      DEBUG_PRINT1("= ");
+      val = ((val & (1U << portBit)) != 0) ? HIGH : LOW;
+      DEBUG_PRINT1(val);
+      DEBUG_PRINT1("= (PIN");
+      DEBUG_PRINT1(portName);
+      DEBUG_PRINT1(" & ");
+      DEBUG_PRINT1(1U << portBit);
+      DEBUG_PRINT1(" != 0); READ\n");
+    #else
+      val = *portInputRegister(portName);
+      DEBUG_PRINT1(val);
+      DEBUG_PRINT1("= ");
+      val = ((val & (1U << portBit)) != 0) ? HIGH : LOW;
+      DEBUG_PRINT1(val);
+      DEBUG_PRINT1("= (*portInputRegister(");
+      DEBUG_PRINT1(portName);
+      DEBUG_PRINT1(") & ");
+      DEBUG_PRINT1(1U << portBit);
+      DEBUG_PRINT1(") != 0); READ\n");
+    #endif // DIGITAL_IO_AVR_PORTMODE
+    return val;
+  }
+
+  ////////////////////////////////////////////////////////////
+  // @brief
+  // AVR specific write routine via pinId
+  // input value can be HIGH or LOW
+  ////////////////////////////////////////////////////////////
+  static inline void writeRaw(uint8_t pinId, uint8_t newValue)
+  {
+    const uint8_t portName = digitalPinToPort(pinId);
+    const uint8_t portBit = digitalPinToBitMask(pinId);
+    #if DIGITAL_IO_AVR_PINMODE != DIGITAL_IO_AVR_DEFAULT
+      if (newValue == LOW)
+      {
+        *portOutputRegister(portName) &= 0xFFU ^ portBit; // L
+        DEBUG_PRINT1("portOutputRegister(");
+        DEBUG_PRINT1(portName);
+        DEBUG_PRINT1(") &= 0xFFU ^ ");
+        DEBUG_PRINT1(portBit);
+        DEBUG_PRINT1("; pinId:");
+        DEBUG_PRINT1(pinId);
+        DEBUG_PRINT1(", newValue:LOW\n");
+      }
+      else // if (newValue == HIGH)
+      {
+        *portOutputRegister(portName) |= portBit; // H
+        DEBUG_PRINT1("portOutputRegister(");
+        DEBUG_PRINT1(portName);
+        DEBUG_PRINT1(") |= ");
+        DEBUG_PRINT1(portBit);
+        DEBUG_PRINT1("; pinId:");
+        DEBUG_PRINT1(pinId);
+        DEBUG_PRINT1(", newValue:HIGH\n");
+      }
+    #else
+      digitalWrite(pinId, newValue);
+      DEBUG_PRINT1("digitalWrite(");
+      DEBUG_PRINT1(pinId);
+      DEBUG_PRINT1(", ");
+      DEBUG_PRINT1(newValue);
+      DEBUG_PRINT1(");\n");
+    #endif // DIGITAL_IO_AVR_PINMODE
+  }
+  ////////////////////////////////////////////////////////////
+  // AVR specific write routine via portName, portBit
+  ////////////////////////////////////////////////////////////
+  static inline void writeRaw(uint8_t portName, uint8_t portBit, uint8_t newValue)
+  {
+    uint8_t val;
+    DEBUG_PRINT1("writeRaw(");
+    DEBUG_PRINT1(portName);
+    DEBUG_PRINT1(",");
+    DEBUG_PRINT1(portBit);
+    DEBUG_PRINT1(",");
+    DEBUG_PRINT1(newValue);
+    DEBUG_PRINT1(") => ");
+    if (newValue == LOW)
+    {
+      #if DIGITAL_IO_AVR_PORTMODE == DIGITAL_IO_AVR_OPTIMIZED
+        #define AVR_PIN_ACTION(portName, portBit) PORT ## portName &= 0xFFU ^ (1U << portBit); val = PORT ## portName
+        APPLY_AVR_ACTION_TO_PORTS(portName, portBit);
+        #undef AVR_PIN_ACTION
+        DEBUG_PRINT1(val);
+        DEBUG_PRINT1("= PORT");
+        DEBUG_PRINT1(portName);
+        DEBUG_PRINT1(" &= ");
+      #else
+        *portOutputRegister(portName) &= 0xFFU ^ (1U << portBit); // L
+        DEBUG_PRINT1(*portOutputRegister(portName));
+        DEBUG_PRINT1(" = *portOutputRegister(");
+        DEBUG_PRINT1(portName);
+        DEBUG_PRINT1(") &= ");
+      #endif // DIGITAL_IO_AVR_PORTMODE
+      DEBUG_PRINT1(0xFFU ^ (1U << portBit));
+      DEBUG_PRINT1("; newValue:LOW\n");
+    }
+    else // if (newValue == HIGH)
+    {
+      #if DIGITAL_IO_AVR_PORTMODE == DIGITAL_IO_AVR_OPTIMIZED
+        #define AVR_PIN_ACTION(portName, portBit) PORT ## portName |= (1U << portBit); val = PORT ## portName
+        APPLY_AVR_ACTION_TO_PORTS(portName, portBit);
+        #undef AVR_PIN_ACTION
+        DEBUG_PRINT1(val);
+        DEBUG_PRINT1("= PORT");
+        DEBUG_PRINT1(portName);
+        DEBUG_PRINT1(" |= ");
+      #else
+        *portOutputRegister(portName) |= (1U << portBit); // H
+        DEBUG_PRINT1(*portOutputRegister(portName));
+        DEBUG_PRINT1("= *portOutputRegister(");
+        DEBUG_PRINT1(portName);
+        DEBUG_PRINT1(") |= ");
+      #endif // DIGITAL_IO_AVR_MODE
+      DEBUG_PRINT1(1U << portBit);
+      DEBUG_PRINT1("; newValue:HIGH\n");
+    }
+  }
+};
+#endif
+
+
+
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+// @brief (for all boards except AVR)
+// Internal class (do not use directly)
+// CLASS digitalIoRaw defines RAW I/O primitives and should not be used as-is.
+// Supports
+// * non-AVR
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+#if !ARDUINO_ARCH_AVR
+class digitalIoRaw
+{
+public:
+
+  ////////////////////////////////////////////////////////////
+  // @brief
+  // Hardware specific config routine
+  ////////////////////////////////////////////////////////////
+  static inline void inputModeRaw(uint8_t pinId)
+  {
+    DEBUG_PRINT1("  pinMode(");
+    DEBUG_PRINT1(pinId);
+    DEBUG_PRINT1(", INPUT);\n");
+    pinMode(pinId, INPUT);
+  }
+
+  ////////////////////////////////////////////////////////////
+  // @brief
+  // Hardware specific config routine
+  ////////////////////////////////////////////////////////////
+  static inline void inputPullupModeRaw(uint8_t pinId)
+  {
+    DEBUG_PRINT1("  pinMode(");
+    DEBUG_PRINT1(pinId);
+    DEBUG_PRINT1(", INPUT_PULLUP);\n");
+    pinMode(pinId, INPUT_PULLUP);
+  }
+
+  ////////////////////////////////////////////////////////////
+  // @brief
+  // Hardware specific config routine
+  ////////////////////////////////////////////////////////////
+  static inline void outputModeRaw(uint8_t pinId)
+  {
+    DEBUG_PRINT1("  pinMode(");
+    DEBUG_PRINT1(pinId);
+    DEBUG_PRINT1(", OUTPUT);\n");
+    pinMode(pinId, OUTPUT);
+  }
+
+  ////////////////////////////////////////////////////////////
+  // @brief
+  // Hardware specific read routine
+  ////////////////////////////////////////////////////////////
+  static inline uint8_t readRaw(uint8_t pinId)
+  {
+    const uint8_t val = digitalRead(pinId);
+    DEBUG_PRINT1(val);
+    DEBUG_PRINT1("= digitalRead(");
+    DEBUG_PRINT1(pinId);
+    DEBUG_PRINT1(");\n");
+    return val;
+  }
+  
+  ////////////////////////////////////////////////////////////
+  // @brief
+  // Hardware specific write routine
+  // input value can be HIGH or LOW
+  ////////////////////////////////////////////////////////////
+  static inline void writeRaw(uint8_t pinId, uint8_t val)
+  {
+    digitalWrite(pinId, val);
+    DEBUG_PRINT1(digitalRead(pinId));
+    DEBUG_PRINT1("= digitalWrite(");
+    DEBUG_PRINT1(pinId);
+    DEBUG_PRINT1(", ");
+    DEBUG_PRINT1(val);
+    DEBUG_PRINT1(");\n");
+  }
+};
+#endif // !ARDUINO_ARCH_AVR
+
+
+
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+// digitalIo / digitalIoAvr macro definitions
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+
+////////////////////////////////////////////////////////////////////////////////
 /// @brief
 /// If a signal is stable for DIGITAL_IO_DEBOUNCE_DELAY, it is considered
 /// debounced and stable. Debounce code will hold up the CPU at least that long.
+////////////////////////////////////////////////////////////////////////////////
 #ifdef DIGITAL_IO_DEBOUNCE_DELAY
-static_assert(DIGITAL_IO_DEBOUNCE_DELAY > 0);
-static_assert(DIGITAL_IO_DEBOUNCE_DELAY < 1000);
+static_assert(DIGITAL_IO_DEBOUNCE_DELAY > 0,
+  "Debounce duration can't be zero");
+static_assert(DIGITAL_IO_DEBOUNCE_DELAY < 1000,
+  "Debounce duration is excessively long");
 constexpr uint16_t DEBOUNCE_DELAY = DIGITAL_IO_DEBOUNCE_DELAY;
 #else
 constexpr uint16_t DEBOUNCE_DELAY = 100;
 #endif
 
+////////////////////////////////////////////////////////////////////////////////
 /// @brief
 /// Internal loop delay in msec (you should not need to change this)
+////////////////////////////////////////////////////////////////////////////////
 #ifdef DIGITAL_IO_DEBOUNCE_LOOP_DELAY
-static_assert(DIGITAL_IO_DEBOUNCE_LOOP_DELAY > 0);
-static_assert(DIGITAL_IO_DEBOUNCE_LOOP_DELAY < 256);
+static_assert(DIGITAL_IO_DEBOUNCE_LOOP_DELAY > 0,
+  "Debounce loop duration can't be zero");
+static_assert(DIGITAL_IO_DEBOUNCE_LOOP_DELAY < 256,
+  "Debounce loop duration must be short");
 constexpr uint8_t LOOP_DELAY =  DIGITAL_IO_DEBOUNCE_LOOP_DELAY;
 #else
 constexpr uint8_t LOOP_DELAY = 2;
 #endif
-static_assert(DEBOUNCE_DELAY >= LOOP_DELAY);
+static_assert(DEBOUNCE_DELAY >= LOOP_DELAY,
+  "Debounce time must be greater than the debounce inner loop period");
 
+////////////////////////////////////////////////////////////////////////////////
+/// @brief
 /// Number of iterations before a transition is considered stable and debounced
 /// defaults to 15, 2msec iterations.
+////////////////////////////////////////////////////////////////////////////////
 constexpr uint16_t DEBOUNCE_ITERS = (DEBOUNCE_DELAY+LOOP_DELAY-1)/LOOP_DELAY;
 
 
+
 ////////////////////////////////////////////////////////////////////////////////
-// @brief
-// CLASS digitalIo should be used when accessing ports via their pin numbers
-//
-// Data: value (class uses 1 byte)
-// Template constants:
-// pinNumber: pin number as printed on the Arduino board, for example 6 is PB6
-// defaultState:  input state when the button is idle, for example HIGH or LOW
 ////////////////////////////////////////////////////////////////////////////////
-template<uint8_t pinNumber, uint8_t defaultState>
-class digitalIo
-{
-protected:
-  // Last value of the pin read (HIGH or LOW)
-  uint8_t value = defaultState;
-
-public:
-
-  ////////////////////////////////////////////////////////////
-  // @brief
-  // Hardware specific config routine
-  ////////////////////////////////////////////////////////////
-  inline void inputMode(void)
-  {
-    DEBUG_PRINT1("  pinMode(");
-    DEBUG_PRINT1(pinNumber);
-    DEBUG_PRINT1(", INPUT);\n");
-    pinMode(pinNumber, INPUT);
-  }
-
-  ////////////////////////////////////////////////////////////
-  // @brief
-  // Hardware specific config routine
-  ////////////////////////////////////////////////////////////
-  inline void inputPullupMode(void)
-  {
-    DEBUG_PRINT1("  pinMode(");
-    DEBUG_PRINT1(pinNumber);
-    DEBUG_PRINT1(", INPUT_PULLUP);\n");
-    pinMode(pinNumber, INPUT_PULLUP);
-  }
-
-  ////////////////////////////////////////////////////////////
-  // @brief
-  // Hardware specific config routine
-  ////////////////////////////////////////////////////////////
-  inline void outputMode(void)
-  {
-    DEBUG_PRINT1("  pinMode(");
-    DEBUG_PRINT1(pinNumber);
-    DEBUG_PRINT1(", OUTPUT);\n");
-    pinMode(pinNumber, OUTPUT);
-  }
-
-  ////////////////////////////////////////////////////////////
-  // @brief
-  // Hardware specific read routine
-  ////////////////////////////////////////////////////////////
-  inline uint8_t read(void)
-  {
-    value = digitalRead(pinNumber);
-    return value;
-  }
-  
-  ////////////////////////////////////////////////////////////
-  // @brief
-  // Hardware specific write routine
-  // input value can be HIGH or LOW
-  ////////////////////////////////////////////////////////////
-  inline void write(uint8_t newValue)
-  {
-    value = newValue;
-    digitalWrite(pinNumber, newValue);
-  }
-  
-  ////////////////////////////////////////////////////////////
-  // @brief
-  // Constructor
-  // Initializes the pin as input
-  ////////////////////////////////////////////////////////////
-  digitalIo()
-  {
-    // Pin 13 is usually attached to an LED & resistor so can't use the pullup
-    if (defaultState == HIGH && pinNumber != 13)
-    {
-      inputPullupMode();
-    }
-    else if (DEBUG_MODE)
-    {
-      // Pins default to inputs so normally we don't have to force it
-      inputMode();
-    }
-  }
-
-  ////////////////////////////////////////////////////////////
-  // @brief
-  // Writes to the output pin the non-default state voltage
-  ////////////////////////////////////////////////////////////
-  inline void turnOn(void)
-  {
-    write((defaultState == LOW) ? HIGH : LOW);
-  }
-
-  ////////////////////////////////////////////////////////////
-  // @brief
-  // Writes to the output its default rest state voltage level
-  ////////////////////////////////////////////////////////////
-  inline void turnOff(void)
-  {
-    write(defaultState);
-  }
-
-  ////////////////////////////////////////////////////////////
-  // @brief
-  // Returns true if the pin is receiving a non default signal
-  ////////////////////////////////////////////////////////////
-  inline bool isOn(void)
-  {
-    read();
-    DEBUG_PRINT3("isOn: ");
-    DEBUG_PRINT3(value);
-    DEBUG_PRINT3("\n");
-    return (value != defaultState);
-  }
-
-  ////////////////////////////////////////////////////////////
-  // @brief
-  // Returns true if the pin is at its default level
-  ////////////////////////////////////////////////////////////
-  inline bool isOff(void)
-  {
-    read();
-    DEBUG_PRINT3("isOff: ");
-    DEBUG_PRINT3(value);
-    DEBUG_PRINT3("\n");
-    return (value == defaultState);
-  }
-
-  ////////////////////////////////////////////////////////////
-  // @brief
-  // Returns the last value of the read (HIGH or LOW).
-  // This function does not read the pin's current value
-  ////////////////////////////////////////////////////////////
-  inline uint8_t lastValue(void)
-  {
-    DEBUG_PRINT2("lastValue: ");
-    DEBUG_PRINT2(value);
-    DEBUG_PRINT2("\n");
-    return value;
-  }
-
-
-  ////////////////////////////////////////////////////////////
-  /// @brief (40B code)
-  /// Returns true if a brief transition was detected.
-  /// This is useful to detect transiant signal like a knock
-  ///
-  /// The function debounces in case of dirty transitions to
-  /// wait for the signal to be stable again.
-  /// Debouncing is done by waiting for DEBOUNCE_ITERS
-  /// identical samples of the pin value. This means the delay
-  /// will be up to DIGITAL_IO_DEBOUNCE_DELAY after the pin
-  /// value stabilized.
-  /// If it stabilizes after 50msec, then the function will
-  /// return after 80msec (with a 30msec default debounce).
-  ////////////////////////////////////////////////////////////
-  bool triggered(void)
-  {
-    uint8_t lastValue = value;
-    uint8_t i = 0;
-
-    read();
-    // No transition detected
-    if (value == lastValue)
-    {
-      return false;
-    }
-
-    // Debounce, wait for multiple identical readings
-    lastValue = value;
-    while (i < DEBOUNCE_ITERS)
-    {
-      read();
-      if (value == lastValue)
-      {
-        ++i;
-      }
-      else
-      {
-        // Unstable signal detected
-        lastValue = value;
-        DEBUG_PRINT1("triggered(");
-        DEBUG_PRINT1(i);
-        DEBUG_PRINT1("):");
-        DEBUG_PRINT1(value);
-        DEBUG_PRINT1(" glitched!\n");
-        // Reset debounce countdown
-        i = 0;
-      }
-      delay(LOOP_DELAY);
-    }
-    return true;
-  }
-
-  ////////////////////////////////////////////////////////////
-  /// @brief (64B code)
-  /// returns a non-zero value on a stable state transitions
-  /// This is used to detect state changes like a button press
-  ///
-  ///  1 if pin was activated (non default level)
-  /// -1 if pin returned to default level
-  ///  0 if pin has not changed state
-  /// The function reads the pin and returns immediately if
-  /// the value is unchanged. If it changed it will sample
-  /// the value and register the change only if it stays
-  /// changed for a DIGITAL_IO_DEBOUNCE_DELAY duration.
-  /// Hence this function returns after no more than
-  /// DIGITAL_IO_DEBOUNCE_DELAY msec.
-  ////////////////////////////////////////////////////////////
-  int8_t changed(void) {
-    const uint8_t lastValue = value;
-    uint8_t i = 0;
-
-    // Simple debounce: detect a transition if the value read
-    // stays different from lastValue for every iteration
-    do
-    {
-      read();
-      // No transition detected
-      if (value == lastValue)
-      {
-	if (DEBUG_MODE && i != 0)
-        {
-          // We detected transient noise on the line
-          DEBUG_PRINT1("changed(");
-          DEBUG_PRINT1(i);
-          DEBUG_PRINT1("):");
-          DEBUG_PRINT1(value);
-          DEBUG_PRINT1(" glitched!\n");
-        }
-        return 0;
-      }
-      delay(LOOP_DELAY); 
-    }
-    while ( i++ < DEBOUNCE_ITERS);
-
-    DEBUG_PRINT2("changed(");
-    DEBUG_PRINT2(i);
-    DEBUG_PRINT2("):");
-    DEBUG_PRINT2(value);
-    DEBUG_PRINT2("\n");
-
-    // Transition detected
-    if (value == defaultState)
-    {
-      // Pin went to rest more
-      return -1;
-    }
-    // Pin activated (for example button is pressed)
-    return 1;
-  }
-}; // digitalIo
-
+////////////////////////////////////////////////////////////////////////////////
+// digitalUltrasonicSensor macro definitions
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
 
 ////////////////////////////////////////////////////////////////////////////////
 // @brief
-// should be used to use a rotary encoder
-//
-// I used the following web page to make this class. Notice how this code is
-// more compact than theirs because of the DigitalIO class. Furthermore it
-// is also protected from glitches coming from noisy signals that may be
-// an issue with worn rotary knobs.
-// https://howtomechatronics.com/tutorials/arduino/rotary-encoder-works-use-arduino/
-//
-// Template parameters:
-// The rotary encoder uses 3 pins, for the pushbutton switch (Sw),
-// clock and data signals (Ck, Dt) also called channel A and B.
-// The code supports limiting the rotary encoder to a [min, max] range of values
-// and can be monitored by an interrupt handler, or with the main loop polling
-// the pins. In the latter case the loop should be as fast as possible (<10ms).
-// The user must also provide an int32_t variable that will be used to store
-// internal data.
-// The reason of this store variable is to support interrupt handlers which need
-// a global variable with aknown address at compile time. The class itself can't
-// provide that unless it uses a static variable, but then it is shared by all
-// the instances of the class. The ISR itself is a static function. By passing
-// it in the template we instantiate the class itself and each variable is a
-// different type with separate constants: The code is duplicated.
+// Timeout limits the distance measured (returns 0 if out of range)
+// currently set to 0x8000/56 = 5.8m (max 11m)
 ////////////////////////////////////////////////////////////////////////////////
-template<uint8_t pinNumberSw, uint8_t pinNumberDt, uint8_t pinNumberCk, int32_t min, int32_t max, bool useInterrupt, volatile int32_t & store>
-class digitalRotaryEncoder : public digitalIo<pinNumberSw, HIGH>
+#ifndef DIGITAL_IO_SONAR_TIMEOUT
+#define DIGITAL_IO_SONAR_TIMEOUT 0x8000
+#endif
+static_assert(DIGITAL_IO_SONAR_TIMEOUT < 0xFFFF,
+  "DIGITAL_IO_SONAR_TIMEOUT must be less than 65535usec (1129cm)");
+
+////////////////////////////////////////////////////////////////////////////////
+// @brief
+// Units of measurements supported by the class
+////////////////////////////////////////////////////////////////////////////////
+enum digitalIoDistanceUnits: uint8_t
 {
-protected:
-  static constexpr int32_t MASK = (int32_t)((~0UL)^1UL);
-  static_assert(MASK == 0xFFFFfffe);
-
-  ////////////////////////////////////////////////////////////
-  // @brief
-  // Hardware specific config routine
-  ////////////////////////////////////////////////////////////
-  inline void setRotaryMode()
-  {
-    if (DEBUG_MODE)
-    {
-      pinMode(pinNumberCk, INPUT);
-      pinMode(pinNumberDt, INPUT);
-    }
-  }
-
-  ////////////////////////////////////////////////////////////
-  // @brief
-  // Hardware specific read routine for clock pin
-  ////////////////////////////////////////////////////////////
-  static inline uint8_t readCk(void)
-  {
-    return digitalRead(pinNumberCk);
-  }
-  
-  ////////////////////////////////////////////////////////////
-  // @brief
-  // Hardware specific read routine for data pin
-  ////////////////////////////////////////////////////////////
-  static inline uint8_t readDt(void)
-  {
-    return digitalRead(pinNumberDt);
-  }
-  
-  ////////////////////////////////////////////////////////////
-  // @brief
-  // Decode the rotary value from the store. The value is
-  // shifted left by 1 bit and stored on 31 bits.
-  ////////////////////////////////////////////////////////////
-  static inline int32_t getValue()
-  {
-    return (MASK & store)/2;
-  }
-
-  ////////////////////////////////////////////////////////////
-  // @brief
-  // Extract the last clock when the rotary value was updated
-  // encoded as the lsbit in the store.
-  ////////////////////////////////////////////////////////////
-  static inline uint8_t getClock()
-  {
-    return (store & 0x01) ? HIGH : LOW;
-  }
-
-  ////////////////////////////////////////////////////////////
-  // @brief
-  // Update the store with the current value and clock bit.
-  ////////////////////////////////////////////////////////////
-  static inline int32_t setStore(int32_t val, uint8_t ck)
-  {
-    store = (val * 2) | (ck == HIGH);
-  }
-
-  ////////////////////////////////////////////////////////////
-  // @brief
-  // Hardware specific read routine
-  ////////////////////////////////////////////////////////////
-  static inline int32_t rotaryUpdate()
-  {
-    int32_t val = getValue();
-
-    // Extract the previous clock from the lowest bit
-    const uint8_t prevCk = getClock();
-    const uint8_t ck = readCk();
-    if (prevCk == ck) {
-      // no clock edge or glitch: unchanged value
-      return val;
-    }
-
-    const uint8_t dt = readDt();
-    if (ck != dt)
-    {
-      // Clockwise
-      if (val < max)
-      {
-        DEBUG_PRINT2("U");
-        val++;
-      }
-    }
-    else
-    {
-      // Counter clockwise
-      if (val > min)
-      {
-        DEBUG_PRINT2("D");
-        val--;
-      }
-    }
-
-    // Reencode the clock on lowest bit and value on 31 bits
-    setStore(val, ck);
-    DEBUG_PRINT2(val);
-    DEBUG_PRINT2("\n");
-    return val;
-  }
-
-  ////////////////////////////////////////////////////////////
-  // @brief
-  // Interrupt service routine to read rotary encoder.
-  // No debounce, we read the values as-is & update counter
-  // Note: We use a template to pass the pointer to the class
-  // instance value to update with the pin interrupting.
-  ////////////////////////////////////////////////////////////
-  static void rotaryISR(void)
-  {
-    (void) rotaryUpdate();
-  }
-
-public:
-  ////////////////////////////////////////////////////////////
-  // @brief
-  // Constructor
-  // Attaches the interrupt handler
-  // If the rotary encoder can be interrupt driven it's better
-  // (Uno, Nano, Duo... but not AtTiny)
-  // Not all chips can have interrupts on all pins, check the
-  // board's documentation.
-  ////////////////////////////////////////////////////////////
-  digitalRotaryEncoder(void)
-  {
-    if (DEBUG_MODE)
-    {
-      // IO defaults to input, in debug mode force it.
-      setRotaryMode();
-    }
-
-    if (useInterrupt)
-    {
-      // Trigger interrupt on both rising and falling edges of the clock
-      // Options: RISING, FALLING, CHANGE
-      attachInterrupt(digitalPinToInterrupt(pinNumberCk), rotaryISR, CHANGE);
-    }
-  }
-
-  ////////////////////////////////////////////////////////////
-  // @brief
-  // Track and return the rotary encoder current value.
-  // If the encoder is tracked with an interrupt it just
-  // reports it, if not it reads the encoder to detect changes
-  // In that case the value is stored only on 31 bits, and
-  // this routine must be called repetively fast (no call to
-  // delay()) to poll the rotary encoder reliably.
-  ////////////////////////////////////////////////////////////
-  int8_t rotaryRead()
-  {
-    if (!useInterrupt)
-    {
-      return rotaryUpdate();
-    }
-    else
-    {
-      int32_t val;
-      ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
-        // Read value without risk of ISR updating it at same time
-        // Keep this code block to a minimum size
-        val = getValue();
-      }
-      return val;
-    }
-  }
-}; // digitalRotaryEncoder
+  usec = 0,      // microseconds for round trip
+  cm = 1,
+  mm = 2,
+  inch = 3,
+  tenth = 4,     // 1/10th inch
+  sixteenth = 5, // 1/16th inch
+};
 
 
 
 ////////////////////////////////////////////////////////////////////////////////
-/// digitalIoAvr is only available on AVR artchitecture. For other architectures
-/// use digitalIo.
-///
-/// The difference is we use macros to access directly the AVR I/O registers.
-/// The benefit is it compiles more compact and is faster because it bypasses
-/// a pretty heavy code layer of the Arduino library.
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+// Instantiation of all digital* and digital*Avr classes
+//
+// The main classes are defined in _DigitalIO.hpp. Their definition uses macros
+// to create 2 versions of the classes while maintaining only one code
+// base for all the classes.
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+
+////////////////////////////////////////////////////////////////////////////////
+// @brief
+// ALL refers to digitalIo classes and AVR to digitalIoAvr classes
+////////////////////////////////////////////////////////////////////////////////
+#define _DIGITAL_IO_ALL 1
+#define _DIGITAL_IO_AVR 2
+
+////////////////////////////////////////////////////////////////////////////////
+// Declare digitalIo<pinNumber,defaultState...> classes
+// These classes work for any Arduino board but have overhead to convert the pin
+// number to the port register and pin (both more code and slower).
+////////////////////////////////////////////////////////////////////////////////
+#define _DIGITAL_IO_VERSION _DIGITAL_IO_ALL
+#include <_DigitalIO.hpp>
+#undef _DIGITAL_IO_VERSION
+
+////////////////////////////////////////////////////////////////////////////////
+// Declare digitalIoAvr<portName,pinNumber,defaultState...> classes
+// These classes specific to AVR boards are more compact and faster, because it
+// avoids PROGMEM tables used to convert pin numbers to ports.
+// The classes take an extra port name template parameter (A..F) and the pin
+// numbers correspond only to that port (0..7).
+// This extension is implemented with macro magic to pass the port name and
+// postfix the class names with "Avr".
 ////////////////////////////////////////////////////////////////////////////////
 #ifdef ARDUINO_ARCH_AVR
-
-#include <Arduino.h>
-
-/// @brief
-/// Catch ports that don't exist for a given chip:
-/// Define a DEFAULT_DDR and DEFAULT_PORT because we can't use NOT_A_PORT to
-/// catch writes to a non-existing port (compilation fails on lvalue).
-/// Hopefully using a non-existing port will fail when reading the PIN which
-/// will map to NOT_A_PORT.
-#if defined(DDRA)
-#define DEFAULT_DDR  DDRA
-#define DEFAULT_PORT PORTA
-#define DEFAULT_PIN  PORTA
-#elif defined(DDRB)
-#define DEFAULT_DDR  DDRB
-#define DEFAULT_PORT PORTB
-#define DEFAULT_PIN  PORTB
-#elif defined(DDRC)
-#define DEFAULT_DDR  DDRC
-#define DEFAULT_PORT PORTC
-#define DEFAULT_PIN  PORTC
-#elif defined(DDRD)
-#define DEFAULT_DDR  DDRD
-#define DEFAULT_PORT PORTD
-#define DEFAULT_PIN  PORTD
-#elif defined(DDRE)
-#define DEFAULT_DDR  DDRE
-#define DEFAULT_PORT PORTE
-#define DEFAULT_PIN  PORTE
-#elif defined(DDRF)
-#define DEFAULT_DDR  DDRF
-#define DEFAULT_PORT PORTF
-#define DEFAULT_PIN  PORTF
-#endif
-
-/// Override the non-existing ports
-#ifndef DDRA
-#define DDRA  DEFAULT_DDR
-#define PORTA DEFAULT_PORT
-#define PINA  DEFAULT_PIN
-#endif
-#ifndef DDRB
-#define DDRB  DEFAULT_DDR
-#define PORTB DEFAULT_PORT
-#define PINB  DEFAULT_PIN
-#endif
-#ifndef DDRC
-#define DDRC  DEFAULT_DDR
-#define PORTC DEFAULT_PORT
-#define PINC  DEFAULT_PIN
-#endif
-#ifndef DDRD
-#define DDRD  DEFAULT_DDR
-#define PORTD DEFAULT_PORT
-#define PIND  DEFAULT_PIN
-#endif
-#ifndef DDRE
-#define DDRE  DEFAULT_DDR
-#define PORTE DEFAULT_PORT
-#define PINE  DEFAULT_PIN
-#endif
-#ifndef DDRF
-#define DDRF  DEFAULT_DDR
-#define PORTF DEFAULT_PORT
-#define PINF  DEFAULT_PIN
-#endif
-
-/// @brief
-/// Macros to access the port Data Direction control Register's address
-/// The macro uses the char to pick the named registers DDRA ... DDRF
-#define AVR_DDR(c) ((c == 'A') ? DDRA : (c == 'B') ? DDRB : (c == 'C') ? DDRC : \
-                     (c == 'D') ? DDRD : (c == 'E') ? DDRE : (c == 'F') ? DDRF : \
-                     DEFAULT_DDR)
-
-/// @brief
-/// Set port pin as an input by forcing DDR bit to zero
-#define AVR_SET_AS_IN(port, pin)  AVR_DDR(port) = AVR_DDR(port) & (0xFFU ^ (0x01U << (pin)))
-#define AVR_SET_AS_OUT(port, pin) AVR_DDR(port) = AVR_DDR(port) | 0x01U << (pin)
-
-#define AVR_PORT(c) ((c == 'A') ? PORTA : (c == 'B') ? PORTB : (c == 'C') ? PORTC : \
-                     (c == 'D') ? PORTD : (c == 'E') ? PORTE : (c == 'F') ? PORTF : \
-                     DEFAULT_PORT)
-/// @brief
-/// Macro to access the Port Data Register
-/// Set output high/pull-up or low/high-impedance
-#define AVR_SET_LOW(port, pin)  AVR_PORT(port) = AVR_PORT(port) & 0xFFU ^ (0x01U << (pin))
-#define AVR_SET_HIGH(port, pin) AVR_PORT(port) = AVR_PORT(port) | (0x01U << (pin))
-#define AVR_WRITE(port, pin, value) if (value) { AVR_SET_HIGH(port, pin);} else { AVR_SET_LOW(port, pin);}
-
-/// @brief
-/// Macro to access the Input Pin Address Regiter
-#define AVR_PIN(c) ((c == 'A') ? PINA : (c == 'B') ? PINB : (c == 'C') ? PINC : \
-                    (c == 'D') ? PIND : (c == 'E') ? PINE : (c == 'F') ? PINF : \
-                    DEFAULT_PIN)
-#define AVR_READ(port, pin) (((AVR_PIN(port) & (0x01U << (pin))) == 0) ? LOW : HIGH)
-
-
-////////////////////////////////////////////////////////////////////////////////
-// @brief
-// CLASS digitalIoAvr should be used when accessing ports via their pin numbers
-//
-// Data: value (class uses 1 byte)
-// Template constants:
-// pinNumber: pin number as printed on the Arduino board, for example 6 is PB6
-// defaultState:  input state when the button is idle, for example HIGH or LOW
-////////////////////////////////////////////////////////////////////////////////
-template<char portName, uint8_t portPin, uint8_t defaultState>
-class digitalIoAvr
-{
-public:
-
-  // Last value of the pin read (HIGH or LOW)
-  uint8_t value = defaultState;
-
-  ////////////////////////////////////////////////////////////
-  // @brief
-  // Hardware specific config routine
-  ////////////////////////////////////////////////////////////
-  inline void inputMode(void)
-  {
-    DEBUG_PRINT1("  AVR_SET_AS_IN(");
-    DEBUG_PRINT1(portName);
-    DEBUG_PRINT1(",");
-    DEBUG_PRINT1(portPin);
-    DEBUG_PRINT1(");\n");
-    AVR_SET_AS_IN(portName, portPin);
-  }
-
-  ////////////////////////////////////////////////////////////
-  // @brief
-  // Hardware specific config routine
-  ////////////////////////////////////////////////////////////
-  inline void inputPullupMode(void)
-  {
-    inputMode();
-    DEBUG_PRINT1("  AVR_SET_HIGH(");
-    DEBUG_PRINT1(portName);
-    DEBUG_PRINT1(",");
-    DEBUG_PRINT1(portPin);
-    DEBUG_PRINT1(");\n");
-    AVR_SET_HIGH(portName, portPin);
-  }
-
-  ////////////////////////////////////////////////////////////
-  // @brief
-  // Hardware specific config routine
-  ////////////////////////////////////////////////////////////
-  inline void outputMode(void)
-  {
-    DEBUG_PRINT1("  AVR_SET_AS_OUT(");
-    DEBUG_PRINT1(portName);
-    DEBUG_PRINT1(",");
-    DEBUG_PRINT1(portPin);
-    DEBUG_PRINT1(");\n");
-    AVR_SET_AS_OUT(portName, portPin);
-  }
-
-  ////////////////////////////////////////////////////////////
-  // @brief
-  // Hardware specific read routine
-  ////////////////////////////////////////////////////////////
-  inline uint8_t read(void)
-  {
-    value = AVR_READ(portName, portPin);
-    return value;
-  }
-  
-  ////////////////////////////////////////////////////////////
-  // @brief
-  // Hardware specific write routine
-  // input value can be HIGH or LOW
-  ////////////////////////////////////////////////////////////
-  inline void write(uint8_t newValue)
-  {
-    value = newValue;
-    AVR_WRITE(portName, portPin, (bool) newValue);
-  }
-  
-  ////////////////////////////////////////////////////////////
-  // @brief
-  // Constructor
-  // Initializes the pin as input
-  ////////////////////////////////////////////////////////////
-  digitalIoAvr()
-  {
-    if (defaultState == HIGH)
-    {
-      inputPullupMode();
-    }
-    else if (DEBUG_MODE)
-    {
-      // Pins default to inputs so normally we don't have to force it
-      inputMode();
-    }
-  }
-
-  ////////////////////////////////////////////////////////////
-  // @brief
-  // Writes to the output pin the non-default state voltage
-  ////////////////////////////////////////////////////////////
-  inline void turnOn(void)
-  {
-    write((defaultState == LOW) ? HIGH : LOW);
-  }
-
-  ////////////////////////////////////////////////////////////
-  // @brief
-  // Writes to the output its default rest state voltage level
-  ////////////////////////////////////////////////////////////
-  inline void turnOff(void)
-  {
-    write(defaultState);
-  }
-
-  ////////////////////////////////////////////////////////////
-  // @brief
-  // Returns true if the pin is receiving a non default signal
-  ////////////////////////////////////////////////////////////
-  inline bool isOn(void)
-  {
-    read();
-    DEBUG_PRINT3("isOn: ");
-    DEBUG_PRINT3(value);
-    DEBUG_PRINT3("\n");
-    return (value != defaultState);
-  }
-
-  ////////////////////////////////////////////////////////////
-  // @brief
-  // Returns true if the pin is at its default level
-  ////////////////////////////////////////////////////////////
-  inline bool isOff(void)
-  {
-    read();
-    DEBUG_PRINT3("isOff: ");
-    DEBUG_PRINT3(value);
-    DEBUG_PRINT3("\n");
-    return (value == defaultState);
-  }
-
-  ////////////////////////////////////////////////////////////
-  // @brief
-  // Returns the last value of the read (HIGH or LOW).
-  // This function does not read the pin's current value
-  ////////////////////////////////////////////////////////////
-  inline uint8_t lastValue(void)
-  {
-    DEBUG_PRINT2("lastValue: ");
-    DEBUG_PRINT2(value);
-    DEBUG_PRINT2("\n");
-    return value;
-  }
-
-
-  ////////////////////////////////////////////////////////////
-  /// @brief (40B code)
-  /// Returns true if a brief transition was detected.
-  /// This is useful to detect transiant signal like a knock
-  ///
-  /// The function debounces in case of dirty transitions to
-  /// wait for the signal to be stable again.
-  /// Debouncing is done by waiting for DEBOUNCE_ITERS
-  /// identical samples of the pin value. This means the delay
-  /// will be up to DIGITAL_IO_DEBOUNCE_DELAY after the pin
-  /// value stabilized.
-  /// If it stabilizes after 50msec, then the function will
-  /// return after 80msec (with a 30msec default debounce).
-  ////////////////////////////////////////////////////////////
-  bool triggered(void)
-  {
-    uint8_t lastValue = value;
-    uint8_t i = 0;
-
-    read();
-    // No transition detected
-    if (value == lastValue)
-    {
-      return false;
-    }
-
-    // Debounce, wait for multiple identical readings
-    lastValue = value;
-    while (i < DEBOUNCE_ITERS)
-    {
-      read();
-      if (value == lastValue)
-      {
-        ++i;
-      }
-      else
-      {
-        // Unstable signal detected
-        lastValue = value;
-        DEBUG_PRINT1("triggered(");
-        DEBUG_PRINT1(i);
-        DEBUG_PRINT1("):");
-        DEBUG_PRINT1(value);
-        DEBUG_PRINT1(" glitched!\n");
-        // Reset debounce countdown
-        i = 0;
-      }
-      delay(LOOP_DELAY);
-    }
-    return true;
-  }
-
-  ////////////////////////////////////////////////////////////
-  /// @brief (64B code)
-  /// returns a non-zero value on a stable state transitions
-  /// This is used to detect state changes like a button press
-  ///
-  ///  1 if pin was activated (non default level)
-  /// -1 if pin returned to default level
-  ///  0 if pin has not changed state
-  /// The function reads the pin and returns immediately if
-  /// the value is unchanged. If it changed it will sample
-  /// the value and register the change only if it stays
-  /// changed for a DIGITAL_IO_DEBOUNCE_DELAY duration.
-  /// Hence this function returns after no more than
-  /// DIGITAL_IO_DEBOUNCE_DELAY msec.
-  ////////////////////////////////////////////////////////////
-  int8_t changed(void) {
-    const uint8_t lastValue = value;
-    uint8_t i = 0;
-
-    // Simple debounce: detect a transition if the value read
-    // stays different from lastValue for every iteration
-    do
-    {
-      read();
-      // No transition detected
-      if (value == lastValue)
-      {
-	if (DEBUG_MODE && i != 0)
-        {
-          // We detected transient noise on the line
-          DEBUG_PRINT1("changed(");
-          DEBUG_PRINT1(i);
-          DEBUG_PRINT1("):");
-          DEBUG_PRINT1(value);
-          DEBUG_PRINT1(" glitched!\n");
-        }
-        return 0;
-      }
-      delay(LOOP_DELAY); 
-    }
-    while ( i++ < DEBOUNCE_ITERS);
-
-    DEBUG_PRINT2("changed(");
-    DEBUG_PRINT2(i);
-    DEBUG_PRINT2("):");
-    DEBUG_PRINT2(value);
-    DEBUG_PRINT2("\n");
-
-    // Transition detected
-    if (value == defaultState)
-    {
-      // Pin went to rest more
-      return -1;
-    }
-    // Pin activated (for example button is pressed)
-    return 1;
-  }
-}; // digitalIoAvr
-
-
-////////////////////////////////////////////////////////////////////////////////
-// @brief
-// should be used to use a rotary encoder
-//
-// I used the following web page to make this class. Notice how this code is
-// more compact than theirs because of the DigitalIO class. Furthermore it
-// is also protected from glitches coming from noisy signals that may be
-// an issue with worn rotary knobs.
-// https://howtomechatronics.com/tutorials/arduino/rotary-encoder-works-use-arduino/
-//
-// For AVR, instead of specifying a pin you specify a port letter and pin.
-// 
-// To use the AVR version you need to provide the interruptVector number.
-// On Arduino UNO:
-//   INT0_vect for D2 (pin 2)
-//   INT1_vect for D3 (pin 3)
-// http://www.gammon.com.au/interrupts
-////////////////////////////////////////////////////////////////////////////////
-template<char portNameSw, uint8_t portPinSw,
-         char portNameDt, uint8_t portPinDt,
-         char portNameCk, uint8_t portPinCk,
-         int32_t min, int32_t max,
-         bool useInterrupt, uint8_t interruptVector,
-         volatile int32_t & store>
-class digitalRotaryEncoderAvr : public digitalIoAvr<portNameSw, portPinSw, HIGH>
-{
-protected:
-  static constexpr int32_t MASK = (int32_t)((~0UL)^1UL);
-  static_assert(MASK == 0xFFFFfffe);
-
-  ////////////////////////////////////////////////////////////
-  // @brief
-  // Hardware specific config routine
-  ////////////////////////////////////////////////////////////
-  inline void setRotaryMode()
-  {
-    if (DEBUG_MODE)
-    {
-      AVR_SET_AS_IN(portNameDt, portPinDt);
-      AVR_SET_AS_IN(portNameCk, portPinCk);
-    }
-  }
-
-  ////////////////////////////////////////////////////////////
-  // @brief
-  // Hardware specific read routine for clock pin
-  ////////////////////////////////////////////////////////////
-  static inline uint8_t readCk(void)
-  {
-    return AVR_READ(portNameCk, portPinCk);
-  }
-  
-  ////////////////////////////////////////////////////////////
-  // @brief
-  // Hardware specific read routine for data pin
-  ////////////////////////////////////////////////////////////
-  static inline uint8_t readDt(void)
-  {
-    return AVR_READ(portNameDt, portPinDt);
-  }
-  
-  ////////////////////////////////////////////////////////////
-  // @brief
-  // Decode the rotary value from the store. The value is
-  // shifted left by 1 bit and stored on 31 bits.
-  ////////////////////////////////////////////////////////////
-  static inline int32_t getValue()
-  {
-    return (MASK & store)/2;
-  }
-
-  ////////////////////////////////////////////////////////////
-  // @brief
-  // Extract the last clock when the rotary value was updated
-  // encoded as the lsbit in the store.
-  ////////////////////////////////////////////////////////////
-  static inline uint8_t getClock()
-  {
-    return (store & 0x01) ? HIGH : LOW;
-  }
-
-  ////////////////////////////////////////////////////////////
-  // @brief
-  // Update the store with the current value and clock bit.
-  ////////////////////////////////////////////////////////////
-  static inline int32_t setStore(int32_t val, uint8_t ck)
-  {
-    store = (val * 2) | (ck == HIGH);
-  }
-
-  ////////////////////////////////////////////////////////////
-  // @brief
-  // Hardware specific read routine
-  ////////////////////////////////////////////////////////////
-  static inline int32_t rotaryUpdate()
-  {
-    int32_t val = getValue();
-
-    // Extract the previous clock from the lowest bit
-    const uint8_t prevCk = getClock();
-    const uint8_t ck = readCk();
-    if (prevCk == ck) {
-      // no clock edge or glitch: unchanged value
-      return val;
-    }
-
-    const uint8_t dt = readDt();
-    if (ck != dt)
-    {
-      // Clockwise
-      if (val < max)
-      {
-        DEBUG_PRINT2("U");
-        val++;
-      }
-    }
-    else
-    {
-      // Counter clockwise
-      if (val > min)
-      {
-        DEBUG_PRINT2("D");
-        val--;
-      }
-    }
-
-    // Reencode the clock on lowest bit and value on 31 bits
-    setStore(val, ck);
-    DEBUG_PRINT2(val);
-    DEBUG_PRINT2("\n");
-    return val;
-  }
-
-  ////////////////////////////////////////////////////////////
-  // @brief
-  // Interrupt service routine to read rotary encoder.
-  // No debounce, we read the values as-is & update counter
-  // Note: We use a template to pass the pointer to the class
-  // instance value to update with the pin interrupting.
-  ////////////////////////////////////////////////////////////
-  static void rotaryISR(void)
-  {
-    (void) rotaryUpdate();
-  }
-
-public:
-  ////////////////////////////////////////////////////////////
-  // @brief
-  // Constructor
-  // Attaches the interrupt handler
-  // If the rotary encoder can be interrupt driven it's better
-  // (Uno, Nano, Duo... but not AtTiny)
-  // Not all chips can have interrupts on all pins, check the
-  // board's documentation.
-  ////////////////////////////////////////////////////////////
-  digitalRotaryEncoderAvr(void)
-  {
-    if (DEBUG_MODE)
-    {
-      // IO defaults to input, in debug mode force it.
-      setRotaryMode();
-    }
-
-    if (useInterrupt)
-    {
-      // Trigger interrupt on both rising and falling edges of the clock
-      // Options: RISING, FALLING, CHANGE
-      attachInterrupt(interruptVector, rotaryISR, CHANGE);
-    }
-  }
-
-  ////////////////////////////////////////////////////////////
-  // @brief
-  // Track and return the rotary encoder current value.
-  // If the encoder is tracked with an interrupt it just
-  // reports it, if not it reads the encoder to detect changes
-  // In that case the value is stored only on 31 bits, and
-  // this routine must be called repetively fast (no call to
-  // delay()) to poll the rotary encoder reliably.
-  ////////////////////////////////////////////////////////////
-  int8_t rotaryRead()
-  {
-    if (!useInterrupt)
-    {
-      return rotaryUpdate();
-    }
-    else
-    {
-      int32_t val;
-      ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
-        // Read value without risk of ISR updating it at same time
-        // Keep this code block to a minimum size
-        val = getValue();
-      }
-      return val;
-    }
-  }
-}; // digitalRotaryEncoder
+#define _DIGITAL_IO_VERSION _DIGITAL_IO_AVR
+#include <_DigitalIO.hpp>
+#undef _DIGITAL_IO_VERSION
 #endif // ARDUINO_ARCH_AVR
 
 #endif // DIGITAL_IO

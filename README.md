@@ -18,6 +18,7 @@ This library can be used for any digital pin input signal, from sensors such as:
 * KY-017 Mercury Switch
 * A3144 Hall sensor switch
 * KS0038 Reed Switch
+* HC-SR501 Infrared Passive Infrared PIR Motion Sensor (on when LOW)
 * Rotary Encoders
 etc.
 

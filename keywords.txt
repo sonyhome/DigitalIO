@@ -5,6 +5,8 @@
 ########## datatypes ##########
 digitalIo		KEYWORD1
 digitalIoAvr		KEYWORD1
+digitalRotaryEncoder	KEYWORD1
+digitalRotaryEncoderAvr KEYWORD1
 
 ########## functions ##########
 # Configuration
@@ -19,6 +21,8 @@ isOn			KEYWORD2
 isOff			KEYWORD2
 triggered		KEYWORD2
 changed			KEYWORD2
+# Encoder Input
+rotaryRead		KEYWORD2
 
 # Output
 write			KEYWORD2
