@@ -59,7 +59,7 @@ Try the examples (File -> Examples -> DigitalIO).
   * __isOff__: read the value on the port, return true if it is in the default level
   * __isOn__: read the value on the port, return true if it is not in the default level
   * __triggered__: read a debounced value on the port and return true if a transient signal was detected (any brief change of levels)
-  * __changed__: read a debounced value on the port and return 1 if it changed to on, -1 if it changed to off, and 0 if there was no change
+  * __flipped__: read a debounced value on the port and return 1 if it changed to on, -1 if it changed to off, and 0 if there was no change
 * Output
   * __write__: write a value on the port (HIGH or LOW)
   * __turnOn__: write a non-default value on the port
@@ -131,15 +131,15 @@ void setup() {
 }
 
 void loop() {
-  switch (pushButton.debounce())
+  switch (pushButton.flipped())
   {
     case 1:
       // Turn on LED when button is pressed
-      led.set();
+      led.turnOn();
       break;
     case -1:
       // Turn off LED when button is released
-      led.unSet();
+      led.turnOff();
       break;
     case 0:
       // Do nothing if button doesn't change
@@ -160,8 +160,8 @@ It will however filter out oscillations in the transition and wait for the signa
 #include <DigitalIo.h>
 
 // Switch is at rest when high, and grounds the pin to lowwhen pressed
-digitalIo<13, HIGH> led;
-digitalIo<6, HIGH>  knockSensor;
+digitalIoAvr<B, 5, HIGH> led;
+digitalIoAvr<D, 6, HIGH>  knockSensor;
 
 void setup() {
   led.outputMode();
@@ -171,7 +171,7 @@ void loop() {
   if (knockSensor.triggered())
   {
     // Toggle the LED when a knock is detected
-    led.write(! led.read());
+    led.toggle();
   }
   delay(50);
 }
