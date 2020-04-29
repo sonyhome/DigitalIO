@@ -64,6 +64,7 @@ Try the examples (File -> Examples -> DigitalIO).
   * __write__: write a value on the port (HIGH or LOW)
   * __turnOn__: write a non-default value on the port
   * __turnOff__: write a default value on the port
+  * __toggle__:change the value on the port to its opposite
 * Configuration macros
   * __DIGITAL_IO_DEBUG__: turn on debugging mode (1, 2, 3, or 4)
   * __DIGITAL_IO_DEBOUNCE_DELAY__: Override how long to debounce the signal
