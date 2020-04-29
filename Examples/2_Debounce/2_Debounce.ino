@@ -1,8 +1,10 @@
 ////////////////////////////////////////////////////////////////////////////////
 // DigitalIO demo
+// Copyright (c) Dan Truong
+//
 // A straightforward library to use digital switches on Arduinos
 ////////////////////////////////////////////////////////////////////////////////
-// Debounced switch example for Arduino Uno
+// 2_Debounce example for Arduino Uno
 //
 // Debouncing is removing the glitches caused by the switch hardware contact
 // being imperfect and temporarilly having imperfect noisy contacts.
@@ -36,8 +38,8 @@
 //
 // Keyes board's usual wiring:
 // - ---> Gnd
-// + ---> 5V (optional, since there's already a pullup on Pin 6)
-// S ---> Pin 6 
+// + ---> 5V (optional, since there's already a pullup on Pin 7)
+// S ---> Pin 7 
 //
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -47,15 +49,17 @@
 
 #include <DigitalIO.hpp>
 
-// Assumes your sensor is on pin 6, and by default the input is HIGH (5V) when
+// Assumes your sensor is on pin 7, and by default the input is HIGH (5V) when
 // it is off and LOW (ground) when on. The sensor can be a simple button or
 // even a wire that you short to the ground to turn on.
-digitalIo<6, HIGH> inputSensor;
+digitalIo<7, HIGH> sensor;
 digitalIo<13, LOW> led;
 
 // For AVR platforms using the port directly saves memory and is faster
-//digitalIoAvr<'D', 6, HIGH> inputSensor;
-//digitalIoAvr<'B', 5, LOW> led;
+// Search for a diagram of your board to find the mapping between pin number
+// and port name and bit.
+//digitalIoAvr<D, 7, HIGH> sensor;
+//digitalIoAvr<B, 5, LOW> led;
 
 void setup() {
   // Initialize the serial console to see the output of the switch
@@ -68,7 +72,7 @@ void setup() {
 int32_t iters = 500000;
 
 void loop() {
-  // The main loop calls the 3 different ways to scan the digital input pin
+  // The main loop calls the 3 different ways to monitor the sensor pin
   iters++;
   if (iters <= 500000) {
     if (iters == 1) {
@@ -93,7 +97,7 @@ void loop() {
 
 void keypressLoop() {
   // Debounce will detect if the switch had a transition and report it only once
-  switch(inputSensor.changed())
+  switch(sensor.flipped())
   {
     case 1:
       Serial.println("Button is On!");
@@ -112,7 +116,7 @@ void readLoop() {
   // Print the current state (with no debounce) but don't flood the screen when value doesn't change
   static bool wasAlreadySet = false;
 
-  if (inputSensor.isOn()) {
+  if (sensor.isOn()) {
     if (wasAlreadySet == false) {
       Serial.print("On ");
       led.turnOn();
@@ -130,13 +134,12 @@ void readLoop() {
 
 void knockLoop() {
   // Print the current resting state when a knock sensor was triggered
-  if (inputSensor.triggered()) {
-    if (inputSensor.lastValue() == HIGH) {
+  if (sensor.triggered()) {
+    led.toggle();
+    if (sensor.lastValue() == HIGH) {
       Serial.println("Knock detected, stable is Off");
-      led.turnOff();
     } else {
       Serial.println("Knock detected, stable is On");
-      led.turnOn();
     }
   }
 }

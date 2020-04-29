@@ -399,7 +399,14 @@ public:
     #if DIGITAL_IO_AVR_PINMODE != DIGITAL_IO_AVR_DEFAULT
       const uint8_t portBit = digitalPinToBitMask(pinId);
       const uint8_t portName = digitalPinToPort(pinId);
-      inputModeRaw(portName, portBit);
+      DEBUG_PRINT1("inputModeRaw(");
+      DEBUG_PRINT1(pinId);
+      DEBUG_PRINT1(") => portBit:");
+      DEBUG_PRINT1(portBit);
+      DEBUG_PRINT1(", portName:");
+      DEBUG_PRINT1(portName);
+      DEBUG_PRINT1(");\n");
+      *portModeRegister(portName) &= 0xFFU ^ portBit; // I
     #else
       DEBUG_PRINT1("pinmode(");
       DEBUG_PRINT1(pinId);
@@ -410,15 +417,15 @@ public:
   ////////////////////////////////////////////////////////////
   // AVR specific config routine via portName, portBit
   ////////////////////////////////////////////////////////////
-  static inline void inputModeRaw(uint8_t portName, uint8_t portBit)
+  static inline void inputModeRaw(uint8_t portName, uint8_t portPin)
   {
-    *portModeRegister(portName) &= 0xFFU ^ (1U << portBit); // I
+    *portModeRegister(portName) &= 0xFFU ^ (1U << portPin); // I
     DEBUG_PRINT1("inputModeRaw => ");
     DEBUG_PRINT1(*portModeRegister(portName));
     DEBUG_PRINT1("= *portModeRegister(");
     DEBUG_PRINT1(portName);
     DEBUG_PRINT1(") &= ");
-    DEBUG_PRINT1(0xFFU ^ (1U << portBit));
+    DEBUG_PRINT1(0xFFU ^ (1U << portPin));
     DEBUG_PRINT1("; IN\n");
   }
 
@@ -431,7 +438,15 @@ public:
     #if DIGITAL_IO_AVR_PINMODE != DIGITAL_IO_AVR_DEFAULT
       const uint8_t portBit = digitalPinToBitMask(pinId);
       const uint8_t portName = digitalPinToPort(pinId);
-      inputPullupModeRaw(portName, portBit);
+      DEBUG_PRINT1("inputPullupModeRaw(");
+      DEBUG_PRINT1(pinId);
+      DEBUG_PRINT1(") => portBit:");
+      DEBUG_PRINT1(portBit);
+      DEBUG_PRINT1(", portName:");
+      DEBUG_PRINT1(portName);
+      DEBUG_PRINT1(");\n");
+      *portModeRegister(portName) &= 0xFFU ^ portBit; // I
+      *portOutputRegister(portName) |= portBit; // H
     #else
       DEBUG_PRINT1("pinmode(");
       DEBUG_PRINT1(pinId);
@@ -442,16 +457,16 @@ public:
   ////////////////////////////////////////////////////////////
   // AVR specific config routine via portName, portBit
   ////////////////////////////////////////////////////////////
-  static inline void inputPullupModeRaw(uint8_t portName, uint8_t portBit)
+  static inline void inputPullupModeRaw(uint8_t portName, uint8_t portPin)
   {
-    inputModeRaw(portName, portBit);
-    *portOutputRegister(portName) |= (1U <<portBit); // H
+    inputModeRaw(portName, portPin);
+    *portOutputRegister(portName) |= (1U <<portPin); // H
     DEBUG_PRINT1("inputPullupModeRaw => ");
     DEBUG_PRINT1(*portOutputRegister(portName));
     DEBUG_PRINT1("= *portOutputRegister(");
     DEBUG_PRINT1(portName);
     DEBUG_PRINT1(") |= ");
-    DEBUG_PRINT1(1U << portBit);
+    DEBUG_PRINT1(1U << portPin);
     DEBUG_PRINT1("; HIGH\n");
   }
 
@@ -464,7 +479,14 @@ public:
     #if DIGITAL_IO_AVR_PINMODE != DIGITAL_IO_AVR_DEFAULT
       const uint8_t portBit = digitalPinToBitMask(pinId);
       const uint8_t portName = digitalPinToPort(pinId);
-      outputModeRaw(portName, portBit);
+      DEBUG_PRINT1("outputModeRaw(");
+      DEBUG_PRINT1(pinId);
+      DEBUG_PRINT1(") => portBit:");
+      DEBUG_PRINT1(portBit);
+      DEBUG_PRINT1(", portName:");
+      DEBUG_PRINT1(portName);
+      DEBUG_PRINT1(");\n");
+      *portModeRegister(portName) |= portBit; // O
     #else
       DEBUG_PRINT1("pinmode(");
       DEBUG_PRINT1(pinId);
@@ -475,15 +497,15 @@ public:
   ////////////////////////////////////////////////////////////
   // AVR specific config routine via portName, portBit
   ////////////////////////////////////////////////////////////
-  static inline void outputModeRaw(uint8_t portName, uint8_t portBit)
+  static inline void outputModeRaw(uint8_t portName, uint8_t portPin)
   {
-    *portModeRegister(portName) |= (1U << portBit); // O
+    *portModeRegister(portName) |= (1U << portPin); // O
     DEBUG_PRINT1("outputModeRaw => ");
     DEBUG_PRINT1(*portModeRegister(portName));
     DEBUG_PRINT1("= *portModeRegister(");
     DEBUG_PRINT1(portName);
     DEBUG_PRINT1(") |= ");
-    DEBUG_PRINT1(1U << portBit);
+    DEBUG_PRINT1(1U << portPin);
     DEBUG_PRINT1("; OUT\n");
   }
 
@@ -528,34 +550,34 @@ public:
   // statement compiles away to a single line with constants
   // accessing  the port directly.
   ////////////////////////////////////////////////////////////
-  static inline uint8_t readRaw(uint8_t portName, uint8_t portBit)
+  static inline uint8_t readRaw(uint8_t portName, uint8_t portPin)
   {
     uint8_t val;
     DEBUG_PRINT1("readRaw => ");
     #if DIGITAL_IO_AVR_PORTMODE == DIGITAL_IO_AVR_OPTIMIZED
       // For all ports, perform AVR_PIN_ACTION, which is a read of the pin
-      #define AVR_PIN_ACTION(portName, portBit) val = PIN ## portName
-      APPLY_AVR_ACTION_TO_PORTS(portName, portBit);
+      #define AVR_PIN_ACTION(portName, portPin) val = PIN ## portName
+      APPLY_AVR_ACTION_TO_PORTS(portName, portPin);
       #undef AVR_PIN_ACTION
       DEBUG_PRINT1(val);
       DEBUG_PRINT1("= ");
-      val = ((val & (1U << portBit)) != 0) ? HIGH : LOW;
+      val = ((val & (1U << portPin)) != 0) ? HIGH : LOW;
       DEBUG_PRINT1(val);
       DEBUG_PRINT1("= (PIN");
       DEBUG_PRINT1(portName);
       DEBUG_PRINT1(" & ");
-      DEBUG_PRINT1(1U << portBit);
+      DEBUG_PRINT1(1U << portPin);
       DEBUG_PRINT1(" != 0); READ\n");
     #else
       val = *portInputRegister(portName);
       DEBUG_PRINT1(val);
       DEBUG_PRINT1("= ");
-      val = ((val & (1U << portBit)) != 0) ? HIGH : LOW;
+      val = ((val & (1U << portPin)) != 0) ? HIGH : LOW;
       DEBUG_PRINT1(val);
       DEBUG_PRINT1("= (*portInputRegister(");
       DEBUG_PRINT1(portName);
       DEBUG_PRINT1(") & ");
-      DEBUG_PRINT1(1U << portBit);
+      DEBUG_PRINT1(1U << portPin);
       DEBUG_PRINT1(") != 0); READ\n");
     #endif // DIGITAL_IO_AVR_PORTMODE
     return val;
@@ -605,54 +627,54 @@ public:
   ////////////////////////////////////////////////////////////
   // AVR specific write routine via portName, portBit
   ////////////////////////////////////////////////////////////
-  static inline void writeRaw(uint8_t portName, uint8_t portBit, uint8_t newValue)
+  static inline void writeRaw(uint8_t portName, uint8_t portPin, uint8_t newValue)
   {
     uint8_t val;
     DEBUG_PRINT1("writeRaw(");
     DEBUG_PRINT1(portName);
     DEBUG_PRINT1(",");
-    DEBUG_PRINT1(portBit);
+    DEBUG_PRINT1(portPin);
     DEBUG_PRINT1(",");
     DEBUG_PRINT1(newValue);
     DEBUG_PRINT1(") => ");
     if (newValue == LOW)
     {
       #if DIGITAL_IO_AVR_PORTMODE == DIGITAL_IO_AVR_OPTIMIZED
-        #define AVR_PIN_ACTION(portName, portBit) PORT ## portName &= 0xFFU ^ (1U << portBit); val = PORT ## portName
-        APPLY_AVR_ACTION_TO_PORTS(portName, portBit);
+        #define AVR_PIN_ACTION(portName, portPin) PORT ## portName &= 0xFFU ^ (1U << portPin); val = PIN ## portName
+        APPLY_AVR_ACTION_TO_PORTS(portName, portPin);
         #undef AVR_PIN_ACTION
         DEBUG_PRINT1(val);
         DEBUG_PRINT1("= PORT");
         DEBUG_PRINT1(portName);
         DEBUG_PRINT1(" &= ");
       #else
-        *portOutputRegister(portName) &= 0xFFU ^ (1U << portBit); // L
+        *portOutputRegister(portName) &= 0xFFU ^ (1U << portPin); // L
         DEBUG_PRINT1(*portOutputRegister(portName));
         DEBUG_PRINT1(" = *portOutputRegister(");
         DEBUG_PRINT1(portName);
         DEBUG_PRINT1(") &= ");
       #endif // DIGITAL_IO_AVR_PORTMODE
-      DEBUG_PRINT1(0xFFU ^ (1U << portBit));
+      DEBUG_PRINT1(0xFFU ^ (1U << portPin));
       DEBUG_PRINT1("; newValue:LOW\n");
     }
     else // if (newValue == HIGH)
     {
       #if DIGITAL_IO_AVR_PORTMODE == DIGITAL_IO_AVR_OPTIMIZED
-        #define AVR_PIN_ACTION(portName, portBit) PORT ## portName |= (1U << portBit); val = PORT ## portName
-        APPLY_AVR_ACTION_TO_PORTS(portName, portBit);
+        #define AVR_PIN_ACTION(portName, portPin) PORT ## portName |= (1U << portPin); val = PIN ## portName
+        APPLY_AVR_ACTION_TO_PORTS(portName, portPin);
         #undef AVR_PIN_ACTION
         DEBUG_PRINT1(val);
         DEBUG_PRINT1("= PORT");
         DEBUG_PRINT1(portName);
         DEBUG_PRINT1(" |= ");
       #else
-        *portOutputRegister(portName) |= (1U << portBit); // H
+        *portOutputRegister(portName) |= (1U << portPin); // H
         DEBUG_PRINT1(*portOutputRegister(portName));
         DEBUG_PRINT1("= *portOutputRegister(");
         DEBUG_PRINT1(portName);
         DEBUG_PRINT1(") |= ");
       #endif // DIGITAL_IO_AVR_MODE
-      DEBUG_PRINT1(1U << portBit);
+      DEBUG_PRINT1(1U << portPin);
       DEBUG_PRINT1("; newValue:HIGH\n");
     }
   }

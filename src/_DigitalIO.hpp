@@ -124,11 +124,11 @@ public:
   // @brief
   // Wrappers for raw hardware routines: pinNumber -> pinId.
   ////////////////////////////////////////////////////////////
-  inline void inputMode(void) { inputModeRaw(_PORT_NAME pinNumber); }
-  inline void inputPullupMode(void) { inputPullupModeRaw(_PORT_NAME pinNumber); }
-  inline void outputMode(void) { outputModeRaw(_PORT_NAME pinNumber);}
-  inline uint8_t read(void) { return readRaw(_PORT_NAME pinNumber); }
-  inline void write(uint8_t newValue) {writeRaw(_PORT_NAME pinNumber, newValue); }
+  static inline void inputMode(void) { inputModeRaw(_PORT_NAME pinNumber); }
+  static inline void inputPullupMode(void) { inputPullupModeRaw(_PORT_NAME pinNumber); }
+  static inline void outputMode(void) { outputModeRaw(_PORT_NAME pinNumber);}
+  static inline uint8_t read(void) { return readRaw(_PORT_NAME pinNumber); }
+  static inline void write(uint8_t newValue) {writeRaw(_PORT_NAME pinNumber, newValue); }
  
   ////////////////////////////////////////////////////////////
   // @brief
@@ -153,25 +153,37 @@ public:
   // @brief
   // Writes to the output pin the non-default state voltage
   ////////////////////////////////////////////////////////////
-  inline void turnOn(void)
+  static inline void turnOn(void)
   {
-    write((defaultState == LOW) ? HIGH : LOW);
+    constexpr uint8_t notDefaultState =
+                      (defaultState == LOW) ? HIGH : LOW;
+    write(notDefaultState);
   }
 
   ////////////////////////////////////////////////////////////
   // @brief
   // Writes to the output its default rest state voltage level
   ////////////////////////////////////////////////////////////
-  inline void turnOff(void)
+  static inline void turnOff(void)
   {
     write(defaultState);
   }
 
   ////////////////////////////////////////////////////////////
   // @brief
+  // Writes to the output its opposite state
+  ////////////////////////////////////////////////////////////
+  static inline void toggle(void)
+  {
+    const uint8_t flipState = (read() == LOW) ? HIGH : LOW;
+    write(flipState);
+  }
+
+  ////////////////////////////////////////////////////////////
+  // @brief
   // Returns true if the pin is receiving a non default signal
   ////////////////////////////////////////////////////////////
-  inline bool isOn(void)
+  static inline bool isOn(void)
   {
     const uint8_t val = read();
     DEBUG_PRINT3("isOn: ");
@@ -184,7 +196,7 @@ public:
   // @brief
   // Returns true if the pin is at its default level
   ////////////////////////////////////////////////////////////
-  inline bool isOff(void)
+  static inline bool isOff(void)
   {
     const uint8_t val = read();
     DEBUG_PRINT3("isOff: ");

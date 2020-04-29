@@ -1,12 +1,14 @@
 ////////////////////////////////////////////////////////////////////////////////
-// TaskScheduler demo - Copyright (c) 2020 Dan Truong
-// A class to run functions at chosen time intervals
+// 4_TaskScheduler demo
+// Copyright (c) 2020 Dan Truong
+//
+// TaskScheduler: A class to run functions at chosen timer intervals
 ////////////////////////////////////////////////////////////////////////////////
 // This simple example shows how to use the Task Scheduler to run 2 functions at
 // different time intervals.
 // Note:
 // This code only works on Arduinos with AVR microcontroller like UNO, Duo, etc.
-// If your board is incompatible a compile time error will notify you of it.
+// If your board is incompatible, a compile time error will notify you of it.
 ////////////////////////////////////////////////////////////////////////////////
 // Global variables exported:
 // nowUsec time since first task scheduler started (close to time since boot)
@@ -37,20 +39,22 @@
 //         and enable the timer to count to 255 if you don't use Timer0.
 ////////////////////////////////////////////////////////////////////////////////
 // The library is coded to minimise its overheads.
+// It uses 8 bytes for global variables, and 14 bytes per callback.
 //
-// Memory Overhead:
-// Calling foo() directly  1792 - 218 bytes
-// Calling foo() scheduler 2376 - 240 bytes (+584 +22)
-// Calling foo() bar() directly  1832 - 234 bytes
-// Calling foo() bar() scheduler 2522 - 274 bytes (+690 +40)
+// Memory:                       Prog: RAM:       Overhead:
+// Calling foo() directly        1792  218 bytes
+// Calling foo() scheduler       2376  240 bytes (+584 +22)
+// Calling foo() bar() directly  1832  234 bytes
+// Calling foo() bar() scheduler 2522  274 bytes (+690 +40)
 ////////////////////////////////////////////////////////////////////////////////
 //#define TASK_SCHEDULER_DEBUG 3
 #include <TaskScheduler.hpp>
 
+// Put your code in foo and barcallbacks, but keep it small and running fast.
+// Do NOT call delay() in the method, it does not work.
+// Do not expect nowUsec or millis() to change while the callbacks run as the
+// interrupt handlers are disabled.
 void foo(void) {
-  // Put your code in here, but keep it small and running fast.
-  // Do NOT call delay() in the method, it does not work.
-  // Do not expect nowUsec to change while the function runs.s
   Serial.println("foo is running!");
 }
 
@@ -62,8 +66,6 @@ void bar(void) {
 constexpr uint16_t loopPeriodMsec = 500;
 constexpr uint16_t fooPeriodMsec = 1000;
 constexpr uint16_t barPeriodMsec = 2000;
-constexpr uint16_t fooIter = fooPeriodMsec/loopPeriodMsec;
-constexpr uint16_t barIter = barPeriodMsec/loopPeriodMsec;
 
 void setup() {
   Serial.begin(9600);
@@ -72,23 +74,40 @@ void setup() {
 }
 
 void loop() {
-  // Notice the "static" keyword is needed in the declarations
-  // These 2 lines are sufficient to run those functions at the
-  // specified period. No other code is needed.
+  // Use the task scheduler
+  taskLoop();
+  // Equivalent code to run handlers at the same period from
+  // the main loop without the taskScheduler class. Assume
+  // loop() period is greater than foo or bar period.
+  //manualLoop();
+}
+
+void taskLoop() {
+  // Notice the "static" keyword is needed in the declarations.
+  // These 2 declarations are sufficient to start running the
+  // callbacks at their specified period automatically.
   static taskScheduler fooLoop(fooPeriodMsec, foo);
   static taskScheduler barLoop(barPeriodMsec, bar);
 
-  // Equivalent code to run foo at the same period from the main loop:
-  // static uint32_t i = 0;
-  // i++;
-  // if (i % fooIter == 0) { foo(); }
-  // if (i % barIter == 0) { bar(); }
-
-  // The taskScheduler exposes the nowUsec global variable which
-  // reports the time since the taskScheduler engine started.
+  // TaskScheduler exposes the nowUsec global so we can use it
   Serial.print(nowUsec/1000);
   Serial.println("ms");
 
-  // let loop() sleep for a while
+  delay(loopPeriodMsec);
+}
+
+// convert periods to loop iterations to use a simple counter
+constexpr uint16_t fooIter = fooPeriodMsec/loopPeriodMsec;
+constexpr uint16_t barIter = barPeriodMsec/loopPeriodMsec;
+
+void manualLoop() {
+  static uint32_t i = 0;
+  i++;
+  if (i % fooIter == 0) { foo(); }
+  if (i % barIter == 0) { bar(); }
+
+  Serial.print(millis());
+  Serial.println("ms");
+
   delay(loopPeriodMsec);
 }
