@@ -4,6 +4,10 @@
 // @brief
 // Copyright (c) 2015-2020 Dan Truong
 //
+#define DIGITAL_IO_VERSION 2.01
+#define DIGITAL_IO_DATE 2020_04_29
+////////////////////////////////////////////////////////////////////////////////
+//
 // A Digital IO Library for Arduino
 //
 // The digitalIo library aims at simplifying use of devices and sensors attached
@@ -85,6 +89,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
 #ifdef DIGITAL_IO_DEBUG
+
 #warning DIGITAL_IO_DEBUG mode is set
 static_assert(DIGITAL_IO_DEBUG >= 0 && DIGITAL_IO_DEBUG <= 4,
               "Use debug modes 0 to 4");
@@ -92,11 +97,15 @@ static_assert(DIGITAL_IO_DEBUG >= 0 && DIGITAL_IO_DEBUG <= 4,
 #define DEBUG_PRINT2(text) {if ((DIGITAL_IO_DEBUG & 2) != 0) {Serial.print(text);}}
 #define DEBUG_PRINT3(text) {if ((DIGITAL_IO_DEBUG & 3) != 0) {Serial.print(text);}}
 constexpr bool DEBUG_MODE = (DIGITAL_IO_DEBUG > 1);
+
 #else // undefined DIGITAL_IO_DEBUG
-constexpr bool DEBUG_MODE = false;
+
+//constexpr bool DEBUG_MODE = false;
+#define DEBUG_MODE false
 #define DEBUG_PRINT1(text)
 #define DEBUG_PRINT2(text)
 #define DEBUG_PRINT3(text)
+
 #endif // DIGITAL_IO_DEBUG
 
 
@@ -299,17 +308,39 @@ enum avrPorts
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
 
+// Feather doesn't define NOT_AN_INTERRUPT
+#ifndef NOT_AN_INTERRUPT
+#define NOT_AN_INTERRUPT -1
+#endif
+
 ////////////////////////////////////////////////////////////////////////////////
 // @brief
 // Wrapper routines to find the interrupt attached to a digital pin. If the pin
 // has none, returns NOT_AN_INTERRUPT (-1 or 255).
 // This routine just encapsulates the digitalPinToInterrupt() built-in macro.
 ////////////////////////////////////////////////////////////////////////////////
-inline uint8_t pinToIrq(uint8_t pin)
+inline uint8_t pinToIrq(uint8_t pin, int8_t irqNumber)
 {
+  if (irqNumber != NOT_AN_INTERRUPT)
+  {
+    // User override of the interrupt number to use
+//    return irqNumber;
+  }
   return digitalPinToInterrupt(pin);
 }
 
+////////////////////////////////////////////////////////////////////////////////
+// @brief
+// Allow using interrupts if interrupt mode is set and either
+// the pin is attached to an interrupt or the user has overridden the interrupt
+// number to use.
+////////////////////////////////////////////////////////////////////////////////
+bool useInterrupt(uint8_t pin, uint8_t interruptFlag, int8_t irqNumber)
+{
+  return interruptFlag &&
+        ((digitalPinToInterrupt(pin) != NOT_AN_INTERRUPT) ||
+         (irqNumber != NOT_AN_INTERRUPT));
+}
 ////////////////////////////////////////////////////////////////////////////////
 // @brief
 // Wrapper routines to find the interrupt attached to a digital pin. If the pin
@@ -319,48 +350,28 @@ inline uint8_t pinToIrq(uint8_t pin)
 // @todo: Implement a slow fail-safe method using PROGMEM tables
 ////////////////////////////////////////////////////////////////////////////////
 #ifdef ARDUINO_ARCH_AVR
-inline uint8_t pinToIrqAvr(uint8_t port, uint8_t pin)
+inline uint8_t pinToIrqAvr(uint8_t port, uint8_t pin, int8_t irqNumber)
 {
+  // On AVR the user must specify the interrupt vector number, because there is
+  // no easy way to do the conversion in this library. Read the board's
+  // documentation to find which interrupt is attached to wich digital pin.
+  // or see: hardware/...cores/<yourBoard>/core_pins.h digitalPinToInterrupt(p)
+  // UNO: Pin 3 (D3) is attached to interrupt 1, Pin 2 (D2) to interrupt 0.
+  return irqNumber;
   uint8_t irq = NOT_AN_INTERRUPT;
-
-  #if NUM_DIGITAL_PINS < 20
-  if (port == B && pin == 2)
-  {
-    irq = 0; // AtTiny*
-  }
-  #elif NUM_DIGITAL_PINS < 70
-  if (port == D)
-  {
-    switch(pin)
-    {
-      // Uno
-      case 0: irq = 0; break;
-      case 1: irq = 1; break;
-      // Leonardo
-      case 2: irq = 2; break;
-      case 3: irq = 3; break;
-      case 6: irq = 4; break;
-    }
-  }
-  #else // MEGA
-  if (port == D)
-  {
-    if (pin < 3) { irq = pin+2; }
-  }
-  else if (port == E)
-  {
-    if (pin == 4) { irq = 0; }
-    if (pin == 5) { irq = 1; }
-  }
-  #endif // NUM_DIGITAL_PINS
-  DEBUG_PRINT1(irq);
-  DEBUG_PRINT1("= pinToIrqAvr(");
-  DEBUG_PRINT1(port);
-  DEBUG_PRINT1(",");
-  DEBUG_PRINT1(pin);
-  DEBUG_PRINT1(");");
   return irq;
 }
+
+////////////////////////////////////////////////////////////////////////////////
+// @brief
+// Allow using interrupts if interrupt mode is set and the user has provided an
+// interrupt number to use.
+////////////////////////////////////////////////////////////////////////////////
+bool useInterruptAvr(uint8_t port, uint8_t pin, uint8_t interruptFlag, int8_t irqNumber)
+{
+  return interruptFlag && (irqNumber != NOT_AN_INTERRUPT);
+}
+
 #endif // ARDUINO_ARCH_AVR
 
 
@@ -820,7 +831,7 @@ constexpr uint16_t DEBOUNCE_ITERS = (DEBOUNCE_DELAY+LOOP_DELAY-1)/LOOP_DELAY;
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
-// digitalUltrasonicSensor macro definitions
+// digitalSonar macro definitions
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////

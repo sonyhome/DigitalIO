@@ -2,7 +2,7 @@
 // A Digital IO Library for Arduino
 // Copyright (c) 2015-2020 Dan Truong
 ////////////////////////////////////////////////////////////////////////////////
-// 0_Intro_Button_and_builtin_LED
+// Intro_Button_and_builtin_LED
 //
 // This simple demo declares push button and an LED. The LED turns on if you
 // press the push-button.

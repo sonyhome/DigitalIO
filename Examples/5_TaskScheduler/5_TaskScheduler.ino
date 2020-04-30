@@ -1,5 +1,5 @@
 ////////////////////////////////////////////////////////////////////////////////
-// 4_TaskScheduler demo
+// TaskScheduler demo
 // Copyright (c) 2020 Dan Truong
 //
 // TaskScheduler: A class to run functions at chosen timer intervals

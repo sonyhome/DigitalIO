@@ -4,7 +4,7 @@
 //
 // A straightforward library to use digital switches on Arduinos
 ////////////////////////////////////////////////////////////////////////////////
-// 2_Debounce example for Arduino Uno
+// Debounce example for Arduino Uno
 //
 // Debouncing is removing the glitches caused by the switch hardware contact
 // being imperfect and temporarilly having imperfect noisy contacts.

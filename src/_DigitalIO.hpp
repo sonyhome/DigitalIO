@@ -6,6 +6,20 @@
 //
 // See DigitalIO.hpp
 ////////////////////////////////////////////////////////////////////////////////
+// @todo
+// digitalIo:
+// - Interrupt handler on change for pin record UP and DOWN and IRQ_STATE
+//   -> flipped UP: if STATE == IRQ_STATE != LAST_STATE && transition == UP then
+//      assume it's a clean transition no glitch. Else debounce or ignore.
+//   -> triggered if UP ^ DOWN and...
+// digitalEncoder:
+// - Fix direct calls to digitalIoRaw::foo(), maybe inherit protected then
+//   inherit?
+// HC-SR04 untrasonic sonar:
+// - a loop to check port until a timeout.
+// - AVR interrupt doesn't work (pin mapping bug?)
+// - read: For non-AVR we don't know how to set up an interrupt on a digital pin
+////////////////////////////////////////////////////////////////////////////////
 //#include <wiring_private.h> // countPulseASM
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -102,10 +116,6 @@
 // triggered and flipped rely on the previous state read to know if the state 
 // of the port changed. The previous state will be the one monitored by either
 // of them. 
-// @todo: Interrupt handler on change for pin record UP and DOWN and IRQ_STATE
-// -> flipped UP: if STATE == IRQ_STATE != LAST_STATE && transition == UP then
-//    assume it's a clean transition no glitch. Else debounce or ignore.
-// -> triggered if UP ^ DOWN and...
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
@@ -300,7 +310,7 @@ public:
 	if (DEBUG_MODE && i != 0)
         {
           // We detected transient noise on the line
-          DEBUG_PRINT1("changed(");
+          DEBUG_PRINT1("flipped(");
           DEBUG_PRINT1(i);
           DEBUG_PRINT1("):");
           DEBUG_PRINT1(value);
@@ -347,7 +357,7 @@ public:
 // protected against glitchesi from a noisy signal.
 //
 // Class:
-// digitalRotaryEncoder, digitalRotaryEncoderAvr
+// digitalEncoder, digitalEncoderAvr
 //
 // portName: (Avr version) is the port name (A...F). Both pins are on same port
 // pinNumberSw: Either Arduino pin # or port pin # (0..7), the pin connected
@@ -358,28 +368,28 @@ public:
 //           to the clock pin.
 // min:      The lowest value the encoder counts down to (limit -32767)
 // max:      The highest value the encoder counts up to (limit 32767)
-// useInterrupt: If false, use sequential mode, rotaryRead() will poll channel
+// interruptFlag: If false, use sequential mode, readEncoder() will poll channel
 //           A & B to detect changes in the encoder. In that case the function
 //           should be called frequently (<10ms) to avoid missing changes. If
 //           the knob is rotated too fast some changes will be missed or might
 //           be read as an opposite movement. If true, interrupts will be used
-//           to detect the state and rotaryRead() will just return the current
+//           to detect the state and readEncoder() will just return the current
 //           value. The interrupt handler will track the state in time with low
 //           overhead so it should be more reliable.
 //           Read your documentation, pinNumberEcho must be a pin that has an
 //           interrupt vector attached to (for Uno: pin 3 & 4, aka D0 and D1)
 // 
 // Methods:
-// rotaryRead(): Read the current value of the rotary encoder.
+// readEncoder(): Read the current value of the rotary encoder.
 // read(), isOn(), turnOn(), etc. All the digitalIo methods for the button.
 //
 // Example:
-// digitalRotaryEncoder<5,4,3,-64,64,false> encoder;
-// digitalRotaryEncoder<5,4,3,-64,64,true> encoder;
-// digitalRotaryEncoderAvr<D,2,1,0,-64,64,false> encoder;
-// digitalRotaryEncoderAvr<D,2,1,0,-64,64,true> encoder;
+// digitalEncoder<5,4,3,-64,64,false> encoder;
+// digitalEncoder<5,4,3,-64,64,true> encoder;
+// digitalEncoderAvr<D,2,1,0,-64,64,false> encoder;
+// digitalEncoderAvr<D,2,1,0,-64,64,true> encoder;
 //
-// if (encoder.isOn()) {Serial.println(encoder.rotaryRead();}
+// if (encoder.isOn()) {Serial.println(encoder.readEncoder();}
 //
 // Technical note:
 // Each instance of the class uses 2 bytes to store the encoder value, and one
@@ -395,10 +405,10 @@ public:
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
 template<_PORT_NAME_TEMPLATE uint8_t pinNumberSw, uint8_t pinNumberDt,
-         uint8_t pinNumberCk, int16_t min, int16_t max, bool useInterrupt>
-class _CLASS_NAME(digitalRotaryEncoder) :
-      public _CLASS_NAME(digitalIo)<_PORT_NAME pinNumberSw, HIGH>,
-      public digitalIoRaw
+         uint8_t pinNumberCk, int16_t min, int16_t max,
+         bool interruptFlag = false, uint8_t irqNumber = NOT_AN_INTERRUPT>
+class _CLASS_NAME(digitalEncoder) :
+      public _CLASS_NAME(digitalIo)<_PORT_NAME pinNumberSw, HIGH>
 {
 protected:
   static volatile int16_t store;
@@ -409,7 +419,7 @@ protected:
   ////////////////////////////////////////////////////////////
   static inline uint8_t readCk(void)
   {
-    return readRaw(_PORT_NAME pinNumberCk);
+    return digitalIoRaw::readRaw(_PORT_NAME pinNumberCk);
   }
   
   ////////////////////////////////////////////////////////////
@@ -418,7 +428,7 @@ protected:
   ////////////////////////////////////////////////////////////
   static inline uint8_t readDt(void)
   {
-    return readRaw(_PORT_NAME pinNumberDt);
+    return digitalIoRaw::readRaw(_PORT_NAME pinNumberDt);
   }
   
   ////////////////////////////////////////////////////////////
@@ -428,7 +438,7 @@ protected:
   ////////////////////////////////////////////////////////////
   static inline int16_t getValue()
   {
-    return store / 2;
+    return store>>1;
   }
 
   ////////////////////////////////////////////////////////////
@@ -445,34 +455,53 @@ protected:
   // @brief
   // Update the store with the current value and clock bit.
   ////////////////////////////////////////////////////////////
-  static inline int16_t setStore(int16_t val, uint8_t ck)
+  static inline void setStore(int16_t val, uint8_t ck)
   {
+    DEBUG_PRINT1("va:");
+    DEBUG_PRINT1(val);
+    DEBUG_PRINT1(" ck:");
+    DEBUG_PRINT1(ck);
+    DEBUG_PRINT1(" st:");
+    DEBUG_PRINT1(store);
+    DEBUG_PRINT1(" > ");
     store = (val * 2) | (ck == HIGH);
+    DEBUG_PRINT1(store);
+    DEBUG_PRINT1(" STORE\n");
   }
 
   ////////////////////////////////////////////////////////////
   // @brief
   // Hardware specific read routine
   ////////////////////////////////////////////////////////////
-  static inline int16_t rotaryUpdate()
+  static inline int16_t encoderUpdate()
   {
     int16_t val = getValue();
 
     // Extract the previous clock from the lowest bit
     const uint8_t prevCk = getClock();
     const uint8_t ck = readCk();
+
     if (prevCk == ck) {
       // no clock edge or glitch: unchanged value
       return val;
     }
-
     const uint8_t dt = readDt();
+
+    DEBUG_PRINT1("va:");
+    DEBUG_PRINT1(val);
+    DEBUG_PRINT1(" pck:");
+    DEBUG_PRINT1(prevCk);
+    DEBUG_PRINT1(" ck:");
+    DEBUG_PRINT1(ck);
+    DEBUG_PRINT1(" dt:");
+    DEBUG_PRINT1(dt);
+
     if (ck != dt)
     {
       // Clockwise
       if (val < max)
       {
-        DEBUG_PRINT2("U");
+        DEBUG_PRINT2(" U");
         val++;
       }
     }
@@ -481,15 +510,17 @@ protected:
       // Counter clockwise
       if (val > min)
       {
-        DEBUG_PRINT2("D");
+        DEBUG_PRINT2(" D");
         val--;
       }
     }
+    DEBUG_PRINT1("> ");
+    DEBUG_PRINT2(val);
+    DEBUG_PRINT1(" encoderUpdate");
+    DEBUG_PRINT2("\n");
 
     // Reencode the clock on lowest bit and value on 31 bits
     setStore(val, ck);
-    DEBUG_PRINT2(val);
-    DEBUG_PRINT2("\n");
     return val;
   }
 
@@ -498,9 +529,10 @@ protected:
   // Interrupt service routine to read rotary encoder.
   // No debounce, we read the values as-is & update counter
   ////////////////////////////////////////////////////////////
-  static void rotaryISR(void)
+  static void encoderISR(void)
   {
-    (void) rotaryUpdate();
+    DEBUG_PRINT1("ISR: ");
+    (void) encoderUpdate();
   }
 
 public:
@@ -513,23 +545,23 @@ public:
   // Not all chips can have interrupts on all pins, check the
   // board's documentation.
   ////////////////////////////////////////////////////////////
-  _CLASS_NAME(digitalRotaryEncoder)(void)
+  _CLASS_NAME(digitalEncoder)(void)
   {
     if (DEBUG_MODE)
     {
       // IO defaults to input, in debug mode force it.
-      inputModeRaw(_PORT_NAME pinNumberCk);
-      inputModeRaw(_PORT_NAME pinNumberDt);
+      digitalIoRaw::inputModeRaw(_PORT_NAME pinNumberCk);
+      digitalIoRaw::inputModeRaw(_PORT_NAME pinNumberDt);
     }
 
-    if (useInterrupt)
+    if (interruptFlag)
     {
-      const uint8_t interruptNumber =
-                    _CLASS_NAME(pinToIrq)(_PORT_NAME pinNumberCk);
-      if (interruptNumber != NOT_AN_INTERRUPT)
+      const uint8_t irq = 
+                    _CLASS_NAME(pinToIrq)(_PORT_NAME pinNumberCk, irqNumber);
+      if (_CLASS_NAME(useInterrupt)(_PORT_NAME pinNumberCk, interruptFlag, irqNumber))
       {
         // Options: Trigger interrupt on RISING, FALLING, CHANGE edge
-        attachInterrupt(interruptNumber, rotaryISR, CHANGE);
+        attachInterrupt(irq, encoderISR, CHANGE);
       }
     }
   }
@@ -543,12 +575,13 @@ public:
   // this routine must be called repetively fast (no call to
   // delay()) to poll the rotary encoder reliably.
   ////////////////////////////////////////////////////////////
-  static inline int8_t rotaryRead()
+  static inline int8_t readEncoder()
   {
-    if (!useInterrupt)
+    if (! _CLASS_NAME(useInterrupt)(_PORT_NAME pinNumberCk, interruptFlag, irqNumber))
     {
-      return rotaryUpdate();
+      return encoderUpdate();
     }
+
     int16_t val = 0;
     #ifdef AVR // For AVR only 1B reads are atomic, so prevent IRQs when reading value
     ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
@@ -560,13 +593,13 @@ public:
     }
     return val;
   }
-}; // digitalRotaryEncoder
+}; // digitalEncoder
 
-// store: Static variable declarations for digitalRotaryEncoder
+// store: Static variable declarations for digitalEncoder
 template<_PORT_NAME_TEMPLATE uint8_t pinNumberSw, uint8_t pinNumberDt,
-          uint8_t pinNumberCk, int16_t min, int16_t max, bool useInterrupt>
-volatile int16_t _CLASS_NAME(digitalRotaryEncoder) <_PORT_NAME pinNumberSw,
-                 pinNumberDt, pinNumberCk, min, max, useInterrupt>::store;
+          uint8_t pinNumberCk, int16_t min, int16_t max, bool interruptFlag, uint8_t irqNumber>
+volatile int16_t _CLASS_NAME(digitalEncoder) <_PORT_NAME pinNumberSw,
+                 pinNumberDt, pinNumberCk, min, max, interruptFlag, irqNumber>::store;
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -582,7 +615,7 @@ volatile int16_t _CLASS_NAME(digitalRotaryEncoder) <_PORT_NAME pinNumberSw,
 // 60ms rest between measurement is ideal.
 //
 // Class:
-// digitalUltrasonicSensor or digitalUltrasonicSensorAvr
+// digitalSonar or digitalSonarAvr
 //
 // The properties are defined via template constants.
 // portName: (Avr version) is the port name (A...F). Both pins are on same port
@@ -590,7 +623,7 @@ volatile int16_t _CLASS_NAME(digitalRotaryEncoder) <_PORT_NAME pinNumberSw,
 //           to the trigger of the sensor (written to)
 // pinNumberEcho: Either Arduino pin # or port pin # (0..7), the pin connected
 //           to the echo return of the sensor (read)
-// useInterrupt: If false, use sequential mode, read() will wait for the echo
+// interruptFlag: If false, use sequential mode, read() will wait for the echo
 //           to come back. If true, use interrupt mode, read() will read the
 //           previous value, initialize trigger, and set-up the interupt handler
 //           to get the next echo value. The read() does not wait for the echo
@@ -609,10 +642,10 @@ volatile int16_t _CLASS_NAME(digitalRotaryEncoder) <_PORT_NAME pinNumberSw,
 //           monitoring and return 0 (default 0x8000 aka 5.6m max range).
 //
 // Example:
-// digitalUltrasonicSensor<7, 2, true> sonar;
-// digitalUltrasonicSensor<7, 6, false> sonar;
-// digitalUltrasonicSensorAvr<D, 5, 0, true> sonar;
-// digitalUltrasonicSensorAvr<D, 5, 4, false> sonar;
+// digitalSonar<7, 2, true> sonar;
+// digitalSonar<7, 6, false> sonar;
+// digitalSonarAvr<D, 5, 0, true> sonar;
+// digitalSonarAvr<D, 5, 4, false> sonar;
 //
 // Serial.println(sonar.read(inch));
 //
@@ -633,8 +666,9 @@ volatile int16_t _CLASS_NAME(digitalRotaryEncoder) <_PORT_NAME pinNumberSw,
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
-template<_PORT_NAME_TEMPLATE uint8_t pinNumberTrig, uint8_t pinNumberEcho, bool useInterrupt>
-class _CLASS_NAME(digitalUltrasonicSensor) : digitalIoRaw
+template<_PORT_NAME_TEMPLATE uint8_t pinNumberTrig, uint8_t pinNumberEcho,
+         bool interruptFlag = false,  uint8_t irqNumber = NOT_AN_INTERRUPT>
+class _CLASS_NAME(digitalSonar) : digitalIoRaw
 {
 protected:
   // Last ping recorded
@@ -698,8 +732,9 @@ protected:
     writeRaw(_PORT_NAME pinNumberTrig, LOW);
 
     // wait for the pulse to start
-    // @note we divide by 16 assuming the while loop uses 16 cycles. Might not!
-    uint32_t loops = microsecondsToClockCycles(DIGITAL_IO_SONAR_TIMEOUT)/16;
+    // @todo empirical measurement on Uno: loop is 95 cycles
+    uint32_t loops =
+       microsecondsToClockCycles(DIGITAL_IO_SONAR_TIMEOUT)/95;
     while  (readRaw(_PORT_NAME pinNumberEcho) == LOW) {
       if (loops-- == 0) break;
     }
@@ -712,8 +747,10 @@ protected:
   ////////////////////////////////////////////////////////////
   static uint16_t waitForValue(void)
   {
-    uint32_t loops = microsecondsToClockCycles(DIGITAL_IO_SONAR_TIMEOUT)/16;
-
+    // wait for the pulse to start
+    // @todo empirical measurement on Uno: loop is 95 cycles
+    uint32_t loops =
+       microsecondsToClockCycles(DIGITAL_IO_SONAR_TIMEOUT)/95;
     // wait for the echo pulse to end
     while  (readRaw(_PORT_NAME pinNumberEcho) == HIGH) {
       if (--loops == 0) return 0;
@@ -765,17 +802,17 @@ public:
   // @brief
   ////////////////////////////////////////////////////////////
   // @brief
-  _CLASS_NAME(digitalUltrasonicSensor)(void)
+  _CLASS_NAME(digitalSonar)(void)
   {
     outputModeRaw(_PORT_NAME pinNumberTrig);
-    if (useInterrupt)
+    if (interruptFlag)
     {
-      const uint8_t interruptNumber =
-                    _CLASS_NAME(pinToIrq)(_PORT_NAME pinNumberEcho);
-      if (interruptNumber != NOT_AN_INTERRUPT)
+      const uint8_t irq = 
+                    _CLASS_NAME(pinToIrq)(_PORT_NAME pinNumberTrig, irqNumber);
+      if (_CLASS_NAME(useInterrupt)(_PORT_NAME pinNumberTrig, interruptFlag, irqNumber))
       {
         // Options: Trigger interrupt on RISING, FALLING, CHANGE edge
-        attachInterrupt(interruptNumber, computeValue, FALLING);
+        attachInterrupt(irq, computeValue, FALLING);
         // Set trigger pin to start interrupt handler's first sample
         triggerPing();
       }
@@ -788,31 +825,30 @@ public:
   ////////////////////////////////////////////////////////////
   static uint16_t read(digitalIoDistanceUnits units = cm)
   {
-    // @todo For non-AVR we don't know how to set up an interrupt on a digital pin
-    if (useInterrupt)
+    if (! _CLASS_NAME(useInterrupt)(_PORT_NAME pinNumberTrig, interruptFlag, irqNumber))
     {
-      uint16_t val;
-      #ifdef AVR
-      // Read value collected by interupt handler. Block ISR update to red coherent value
-      ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
-      #endif // AVR
-      {
-        val = getValue();
-      }
-      // Trigger ping, will be collected by ISR for the next read
+      // Trigger the ping and wait to read echo that comes back
       triggerPing();
-      return getDistance(val, units);
+      return getDistance(waitForValue(), units);
     }
 
-    // Trigger the ping and wait to read echo that comes back
+    uint16_t val;
+    #ifdef AVR
+    // Read value collected by interupt handler. Block ISR update to red coherent value
+    ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
+    #endif // AVR
+    {
+      val = getValue();
+    }
+    // Trigger ping, will be collected by ISR for the next read
     triggerPing();
-    return getDistance(waitForValue(), units);
+    return getDistance(val, units);
   }
-}; // digitalUltrasonicSensor
+}; // digitalSonar
 
-// Static variable declarations for digitalUltrasonicSensor
-template<_PORT_NAME_TEMPLATE uint8_t pinNumberTrig, uint8_t pinNumberEcho, bool useInterrupt>
-uint16_t _CLASS_NAME(digitalUltrasonicSensor)<_PORT_NAME pinNumberTrig, pinNumberEcho, useInterrupt>::sPingUsec = 0;
+// Static variable declarations for digitalSonar
+template<_PORT_NAME_TEMPLATE uint8_t pinNumberTrig, uint8_t pinNumberEcho, bool interruptFlag, uint8_t irqNumber>
+uint16_t _CLASS_NAME(digitalSonar)<_PORT_NAME pinNumberTrig, pinNumberEcho, interruptFlag, irqNumber>::sPingUsec = 0;
 
-template<_PORT_NAME_TEMPLATE uint8_t pinNumberTrig, uint8_t pinNumberEcho, bool useInterrupt>
-uint16_t _CLASS_NAME(digitalUltrasonicSensor)<_PORT_NAME pinNumberTrig, pinNumberEcho, useInterrupt>::sPrevTimeUsec = 0;
+template<_PORT_NAME_TEMPLATE uint8_t pinNumberTrig, uint8_t pinNumberEcho, bool interruptFlag, uint8_t irqNumber>
+uint16_t _CLASS_NAME(digitalSonar)<_PORT_NAME pinNumberTrig, pinNumberEcho, interruptFlag, irqNumber>::sPrevTimeUsec = 0;

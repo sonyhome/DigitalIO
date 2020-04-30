@@ -2,34 +2,37 @@
 # SerialMenu keyword coloring map #
 ###################################
 
-########## datatypes ##########
-digitalIo		KEYWORD1
-digitalIoAvr		KEYWORD1
-digitalRotaryEncoder	KEYWORD1
-digitalRotaryEncoderAvr KEYWORD1
+########## datatypes ###################
+digitalIo			KEYWORD1
+digitalIoAvr			KEYWORD1
+digitalEncoder			KEYWORD1
+digitalEncoderAvr		KEYWORD1
+digitalSonar			KEYWORD1
+digitalSonarAvr			KEYWORD1
+digitalSonar			KEYWORD1
+digitalSonarAvr			KEYWORD1
 
-########## functions ##########
-# Configuration
-inputMode		KEYWORD2
-inputPullupMode		KEYWORD2
-outputMode		KEYWORD2
+########## functions ###################
+### Configuration ###
+inputMode			KEYWORD2
+inputPullupMode			KEYWORD2
+outputMode			KEYWORD2
+### Output ##########
+write				KEYWORD2
+turnOn				KEYWORD2
+turnOff				KEYWORD2
+toggle				KEYWORD2
+### Input ###########
+lastValue			KEYWORD2
+read				KEYWORD2
+isOn				KEYWORD2
+isOff				KEYWORD2
+triggered			KEYWORD2
+changed				KEYWORD2
+### Encoder Input ###
+readEncoder			KEYWORD2
 
-# Input
-lastValue		KEYWORD2
-read			KEYWORD2
-isOn			KEYWORD2
-isOff			KEYWORD2
-triggered		KEYWORD2
-changed			KEYWORD2
-# Encoder Input
-rotaryRead		KEYWORD2
-
-# Output
-write			KEYWORD2
-turnOn			KEYWORD2
-turnOff			KEYWORD2
-
-##########  macros   ##########
+##########  macros   ###################
 DIGITAL_IO_DEBUG		LITERAL2
 DIGITAL_IO_DEBOUNCE_DELAY	LITERAL2
 DIGITAL_IO_DEBOUNCE_LOOP_DELAY	LITERAL2
