@@ -1,6 +1,6 @@
 # Digital IO library
 
-This goal of this Digital I/O library is to simplify the use of simple sensors and devices attached to Digital I/O pins.
+This goal of this Digital I/O library is to ease the use of simple sensors and devices attached to Digital I/O pins.
 
 _If you like this library please star or comment on github to pat me in the back and let others know it exists_
 
@@ -97,6 +97,7 @@ making it a good choice for programs that need to manage multiple things at the 
 
 Let's make the built-in LED blink on an Arduino UNO. Notice the code is smaller, AND simpler to read.
 
+```cpp
     #include <DigitalIO.hpp>
      
     digitalIoAvr<B,5, LOW> led; /* Pin 13 is AVR port B5 */
@@ -109,10 +110,12 @@ Let's make the built-in LED blink on an Arduino UNO. Notice the code is smaller,
       led.toggle();
       delay(500);
     } 
-
+```
 _Sketch uses 718 bytes (2%) of program storage space. Maximum is 32256 bytes._
 _Global variables use 10 bytes (0%) of dynamic memory, leaving 1808 bytes for local variables. Maximum is 2048 bytes._
 
+Code without using the DigitalIO library:
+```cpp
     bool led = false;
      
     void setup()
@@ -124,6 +127,7 @@ _Global variables use 10 bytes (0%) of dynamic memory, leaving 1808 bytes for lo
       led = !led;
       delay(500);
     }
+```
 _Sketch uses 940 bytes (2%) of program storage space. Maximum is 32256 bytes._
 _Global variables use 10 bytes (0%) of dynamic memory, leaving 2038 bytes for local variables. Maximum is 2048 bytes._
 
@@ -151,7 +155,7 @@ void loop() {
 ```
 
 Let's now assume you want to control a relay using a flip switch, and have the built-in LED tell you if the relay is open or closed.
-
+```cpp
     #include <DigitalIO.hpp>
     
     digitalIoAvr<B,5, LOW> led;     /* Pin 13 is AVR port B5 */
@@ -180,11 +184,11 @@ Let's now assume you want to control a relay using a flip switch, and have the b
       Serial.println(button.read());
       delay(500);
     }
-
+```
 What if it's not a flip switch you use but a temporary push button? Every time you press it you want to toggle the relay.
 The method flipped() will return 1 if the button was pressed, -1 if it was released, and 0 if the state of the button has not changed.
 Therefore every time we detect the button just got pressed with flipped(), all you have to do is toggle the LED and relay states.
-
+```cpp
     #include <DigitalIO.hpp>
     
     digitalIoAvr<B,5, LOW> led;     /* Pin 13 is AVR port B5 */
@@ -215,7 +219,7 @@ Therefore every time we detect the button just got pressed with flipped(), all y
       Serial.println(button.read());
       delay(500);
     }
-
+```
 ## AVR Memory improvements
 
 The library comes with the classes digitalIo and digitaIoAvr. The AVR specific version doesn't use the Arduino digitalRead() or
@@ -267,6 +271,20 @@ For the encoder value there is one extra method.
 
 * encoderRead(): Read the current value of the encoder
 
+```cpp
+#include <digitalIO.hpp>
+
+// Attach encoder to pins 5,4,3, limit values to [-32,32] and use interrupt handler to monitor the pins
+digitalEncoder<5,4,3, -32,32, true> rotary;
+
+void begin() { Serial.begin(9600);}
+
+void loop()
+{
+   Serial.println(rotary.encoderRead());
+}
+```
+
 ## Rotary_Encoder example
 
 The example displays on the Serial port the current rotary button value when the rotary button is pressed down.
@@ -283,6 +301,20 @@ The Sonar class is for Ultrasonic sensors. Sonars use 2 pins, and measure distan
 
 * read(u): Read the distance of the nearest object, choose units (mm, cm, inch, tenth in, sixteenth in, msec).
 
+
+```cpp
+#include <digitalIO.hpp>
+
+// Attach sonar to pins 4,3, and use interrupt handler to monitor the pins
+digitalSonar<4,3, true> ultrasonicSensor;
+
+void begin() { Serial.begin(9600);}
+
+void loop()
+{
+   Serial.println(ultrasonicSensor.read("inch"));
+}
+```
 ## Example
 
 The example simply prints on the Serial console the distance measured, and changes the built-in LED to on if there's an object close by, off if there's an object far, and blinks if there's no object detected.
